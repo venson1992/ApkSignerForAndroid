@@ -1,15 +1,20 @@
+//
+// Source code recreated from a .class file by IntelliJ IDEA
+// (powered by FernFlower decompiler)
+//
+
 package com.android.apksigner;
 
 import java.util.Arrays;
 
 class OptionsParser {
-    private int mIndex;
-    private String mLastOptionOriginalForm;
-    private String mLastOptionValue;
     private final String[] mParams;
+    private int mIndex;
     private int mPutBackIndex;
-    private String mPutBackLastOptionOriginalForm;
+    private String mLastOptionValue;
     private String mPutBackLastOptionValue;
+    private String mLastOptionOriginalForm;
+    private String mPutBackLastOptionOriginalForm;
 
     public OptionsParser(String[] params) {
         this.mParams = (String[]) params.clone();
@@ -18,30 +23,34 @@ class OptionsParser {
     public String nextOption() {
         if (this.mIndex >= this.mParams.length) {
             return null;
+        } else {
+            String param = this.mParams[this.mIndex];
+            if (!param.startsWith("-")) {
+                return null;
+            } else {
+                this.mPutBackIndex = this.mIndex++;
+                this.mPutBackLastOptionOriginalForm = this.mLastOptionOriginalForm;
+                this.mLastOptionOriginalForm = param;
+                this.mPutBackLastOptionValue = this.mLastOptionValue;
+                this.mLastOptionValue = null;
+                if (param.startsWith("--")) {
+                    if ("--".equals(param)) {
+                        return null;
+                    } else {
+                        int valueDelimiterIndex = param.indexOf(61);
+                        if (valueDelimiterIndex != -1) {
+                            this.mLastOptionValue = param.substring(valueDelimiterIndex + 1);
+                            this.mLastOptionOriginalForm = param.substring(0, valueDelimiterIndex);
+                            return param.substring("--".length(), valueDelimiterIndex);
+                        } else {
+                            return param.substring("--".length());
+                        }
+                    }
+                } else {
+                    return param.substring("-".length());
+                }
+            }
         }
-        String param = this.mParams[this.mIndex];
-        if (!param.startsWith("-")) {
-            return null;
-        }
-        this.mPutBackIndex = this.mIndex;
-        this.mIndex++;
-        this.mPutBackLastOptionOriginalForm = this.mLastOptionOriginalForm;
-        this.mLastOptionOriginalForm = param;
-        this.mPutBackLastOptionValue = this.mLastOptionValue;
-        this.mLastOptionValue = null;
-        if (!param.startsWith("--")) {
-            return param.substring("-".length());
-        }
-        if ("--".equals(param)) {
-            return null;
-        }
-        int valueDelimiterIndex = param.indexOf(61);
-        if (valueDelimiterIndex == -1) {
-            return param.substring("--".length());
-        }
-        this.mLastOptionValue = param.substring(valueDelimiterIndex + 1);
-        this.mLastOptionOriginalForm = param.substring(0, valueDelimiterIndex);
-        return param.substring("--".length(), valueDelimiterIndex);
     }
 
     public void putOption() {
@@ -54,55 +63,59 @@ class OptionsParser {
         return this.mLastOptionOriginalForm;
     }
 
-    public String getRequiredValue(String valueDescription) throws OptionsException {
+    public String getRequiredValue(String valueDescription) throws OptionsParser.OptionsException {
+        String param;
         if (this.mLastOptionValue != null) {
-            String result = this.mLastOptionValue;
+            param = this.mLastOptionValue;
             this.mLastOptionValue = null;
-            return result;
-        } else if (this.mIndex >= this.mParams.length) {
-            throw new OptionsException(valueDescription + " missing after " + this.mLastOptionOriginalForm);
-        } else {
-            String param = this.mParams[this.mIndex];
-            if ("--".equals(param)) {
-                throw new OptionsException(valueDescription + " missing after " + this.mLastOptionOriginalForm);
-            }
-            this.mIndex++;
             return param;
+        } else if (this.mIndex >= this.mParams.length) {
+            throw new OptionsParser.OptionsException(valueDescription + " missing after " + this.mLastOptionOriginalForm);
+        } else {
+            param = this.mParams[this.mIndex];
+            if ("--".equals(param)) {
+                throw new OptionsParser.OptionsException(valueDescription + " missing after " + this.mLastOptionOriginalForm);
+            } else {
+                ++this.mIndex;
+                return param;
+            }
         }
     }
 
-    public int getRequiredIntValue(String valueDescription) throws OptionsException {
-        String value = getRequiredValue(valueDescription);
+    public int getRequiredIntValue(String valueDescription) throws OptionsParser.OptionsException {
+        String value = this.getRequiredValue(valueDescription);
+
         try {
             return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            throw new OptionsException(valueDescription + " (" + this.mLastOptionOriginalForm + ") must be a decimal number: " + value);
+        } catch (NumberFormatException var4) {
+            throw new OptionsParser.OptionsException(valueDescription + " (" + this.mLastOptionOriginalForm + ") must be a decimal number: " + value);
         }
     }
 
-    public boolean getOptionalBooleanValue(boolean defaultValue) throws OptionsException {
+    public boolean getOptionalBooleanValue(boolean defaultValue) throws OptionsParser.OptionsException {
+        String stringValue;
         if (this.mLastOptionValue != null) {
-            String stringValue = this.mLastOptionValue;
+            stringValue = this.mLastOptionValue;
             this.mLastOptionValue = null;
             if ("true".equals(stringValue)) {
                 return true;
-            }
-            if ("false".equals(stringValue)) {
+            } else if ("false".equals(stringValue)) {
                 return false;
+            } else {
+                throw new OptionsParser.OptionsException("Unsupported value for " + this.mLastOptionOriginalForm + ": " + stringValue + ". Only true or false supported.");
             }
-            throw new OptionsException("Unsupported value for " + this.mLastOptionOriginalForm + ": " + stringValue + ". Only true or false supported.");
         } else if (this.mIndex >= this.mParams.length) {
             return defaultValue;
         } else {
-            String stringValue2 = this.mParams[this.mIndex];
-            if ("true".equals(stringValue2)) {
-                this.mIndex++;
+            stringValue = this.mParams[this.mIndex];
+            if ("true".equals(stringValue)) {
+                ++this.mIndex;
                 return true;
-            } else if (!"false".equals(stringValue2)) {
-                return defaultValue;
-            } else {
-                this.mIndex++;
+            } else if ("false".equals(stringValue)) {
+                ++this.mIndex;
                 return false;
+            } else {
+                return defaultValue;
             }
         }
     }
@@ -110,15 +123,14 @@ class OptionsParser {
     public String[] getRemainingParams() {
         if (this.mIndex >= this.mParams.length) {
             return new String[0];
+        } else {
+            String param = this.mParams[this.mIndex];
+            return "--".equals(param) ? (String[]) Arrays.copyOfRange(this.mParams, this.mIndex + 1, this.mParams.length) : (String[]) Arrays.copyOfRange(this.mParams, this.mIndex, this.mParams.length);
         }
-        if ("--".equals(this.mParams[this.mIndex])) {
-            return (String[]) Arrays.copyOfRange(this.mParams, this.mIndex + 1, this.mParams.length);
-        }
-        return (String[]) Arrays.copyOfRange(this.mParams, this.mIndex, this.mParams.length);
     }
 
     public static class OptionsException extends Exception {
-        private static final long serialVersionUID = 1;
+        private static final long serialVersionUID = 1L;
 
         public OptionsException(String message) {
             super(message);

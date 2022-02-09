@@ -1,3 +1,8 @@
+//
+// Source code recreated from a .class file by IntelliJ IDEA
+// (powered by FernFlower decompiler)
+//
+
 package com.android.apksigner;
 
 import java.io.ByteArrayOutputStream;
@@ -16,103 +21,139 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 public class PasswordRetriever implements AutoCloseable {
     public static final String SPEC_STDIN = "stdin";
-    private boolean mClosed;
     private final Charset mConsoleEncoding = getConsoleEncoding();
     private final Map<File, InputStream> mFileInputStreams = new HashMap();
+    private boolean mClosed;
+
+    public PasswordRetriever() {
+    }
 
     public List<char[]> getPasswords(String spec, String description, Charset... additionalPwdEncodings) throws IOException {
-        assertNotClosed();
+        this.assertNotClosed();
         if (spec.startsWith("pass:")) {
-            return getPasswords(spec.substring("pass:".length()).toCharArray(), additionalPwdEncodings);
-        }
-        if (SPEC_STDIN.equals(spec)) {
+            char[] pwd = spec.substring("pass:".length()).toCharArray();
+            return this.getPasswords(pwd, additionalPwdEncodings);
+        } else if ("stdin".equals(spec)) {
             Console console = System.console();
             if (console != null) {
                 char[] pwd = console.readPassword(description + ": ", new Object[0]);
-                if (pwd != null) {
-                    return getPasswords(pwd, additionalPwdEncodings);
+                if (pwd == null) {
+                    throw new IOException("Failed to read " + description + ": console closed");
+                } else {
+                    return this.getPasswords(pwd, additionalPwdEncodings);
                 }
-                throw new IOException("Failed to read " + description + ": console closed");
+            } else {
+                System.out.println(description + ": ");
+                byte[] encodedPwd = readEncodedPassword(System.in);
+                if (encodedPwd.length == 0) {
+                    throw new IOException("Failed to read " + description + ": standard input closed");
+                } else {
+                    return this.getPasswords(encodedPwd, Charset.defaultCharset(), additionalPwdEncodings);
+                }
             }
-            System.out.println(description + ": ");
-            byte[] encodedPwd = readEncodedPassword(System.in);
-            if (encodedPwd.length != 0) {
-                return getPasswords(encodedPwd, Charset.defaultCharset(), additionalPwdEncodings);
-            }
-            throw new IOException("Failed to read " + description + ": standard input closed");
-        } else if (spec.startsWith("file:")) {
-            File file = new File(spec.substring("file:".length())).getCanonicalFile();
-            InputStream in = this.mFileInputStreams.get(file);
-            if (in == null) {
-                in = new FileInputStream(file);
-                this.mFileInputStreams.put(file, in);
-            }
-            byte[] encodedPwd2 = readEncodedPassword(in);
-            if (encodedPwd2.length != 0) {
-                return getPasswords(encodedPwd2, Charset.defaultCharset(), additionalPwdEncodings);
-            }
-            throw new IOException("Failed to read " + description + " : end of file reached in " + file);
-        } else if (spec.startsWith("env:")) {
-            String value = System.getenv(spec.substring("env:".length()));
-            if (value != null) {
-                return getPasswords(value.toCharArray(), additionalPwdEncodings);
-            }
-            throw new IOException("Failed to read " + description + ": environment variable " + value + " not specified");
         } else {
-            throw new IOException("Unsupported password spec for " + description + ": " + spec);
+            String name;
+            if (spec.startsWith("file:")) {
+                name = spec.substring("file:".length());
+                File file = (new File(name)).getCanonicalFile();
+                InputStream in = (InputStream) this.mFileInputStreams.get(file);
+                if (in == null) {
+                    in = new FileInputStream(file);
+                    this.mFileInputStreams.put(file, in);
+                }
+
+                byte[] encodedPwd = readEncodedPassword((InputStream) in);
+                if (encodedPwd.length == 0) {
+                    throw new IOException("Failed to read " + description + " : end of file reached in " + file);
+                } else {
+                    return this.getPasswords(encodedPwd, Charset.defaultCharset(), additionalPwdEncodings);
+                }
+            } else if (spec.startsWith("env:")) {
+                name = spec.substring("env:".length());
+                String value = System.getenv(name);
+                if (value == null) {
+                    throw new IOException("Failed to read " + description + ": environment variable " + value + " not specified");
+                } else {
+                    return this.getPasswords(value.toCharArray(), additionalPwdEncodings);
+                }
+            } else {
+                throw new IOException("Unsupported password spec for " + description + ": " + spec);
+            }
         }
     }
 
     private List<char[]> getPasswords(char[] pwd, Charset... additionalEncodings) {
-        List<char[]> passwords = new ArrayList<>(3);
-        addPasswords(passwords, pwd, additionalEncodings);
+        List<char[]> passwords = new ArrayList(3);
+        this.addPasswords(passwords, pwd, additionalEncodings);
         return passwords;
     }
 
     private List<char[]> getPasswords(byte[] encodedPwd, Charset encodingForDecoding, Charset... additionalEncodings) {
-        List<char[]> passwords = new ArrayList<>(4);
+        ArrayList passwords = new ArrayList(4);
+
         try {
-            addPasswords(passwords, decodePassword(encodedPwd, encodingForDecoding), additionalEncodings);
-        } catch (IOException e) {
+            char[] pwd = decodePassword(encodedPwd, encodingForDecoding);
+            this.addPasswords(passwords, pwd, additionalEncodings);
+        } catch (IOException var6) {
         }
+
         addPassword(passwords, castBytesToChars(encodedPwd));
         return passwords;
     }
 
     private void addPasswords(List<char[]> passwords, char[] pwd, Charset... additionalEncodings) {
         if (additionalEncodings != null && additionalEncodings.length > 0) {
-            for (Charset encoding : additionalEncodings) {
+            Charset[] var4 = additionalEncodings;
+            int var5 = additionalEncodings.length;
+
+            for (int var6 = 0; var6 < var5; ++var6) {
+                Charset encoding = var4[var6];
+
                 try {
-                    addPassword(passwords, castBytesToChars(encodePassword(pwd, encoding)));
-                } catch (IOException e) {
+                    char[] encodedPwd = castBytesToChars(encodePassword(pwd, encoding));
+                    addPassword(passwords, encodedPwd);
+                } catch (IOException var11) {
                 }
             }
         }
+
         addPassword(passwords, pwd);
+        char[] encodedPwd;
         if (this.mConsoleEncoding != null) {
             try {
-                addPassword(passwords, castBytesToChars(encodePassword(pwd, this.mConsoleEncoding)));
-            } catch (IOException e2) {
+                encodedPwd = castBytesToChars(encodePassword(pwd, this.mConsoleEncoding));
+                addPassword(passwords, encodedPwd);
+            } catch (IOException var10) {
             }
         }
+
         try {
-            addPassword(passwords, castBytesToChars(encodePassword(pwd, Charset.defaultCharset())));
-        } catch (IOException e3) {
+            encodedPwd = castBytesToChars(encodePassword(pwd, Charset.defaultCharset()));
+            addPassword(passwords, encodedPwd);
+        } catch (IOException var9) {
         }
+
     }
 
     private static void addPassword(List<char[]> passwords, char[] password) {
-        for (char[] existingPassword : passwords) {
-            if (Arrays.equals(password, existingPassword)) {
+        Iterator var2 = passwords.iterator();
+
+        char[] existingPassword;
+        do {
+            if (!var2.hasNext()) {
+                passwords.add(password);
                 return;
             }
-        }
-        passwords.add(password);
+
+            existingPassword = (char[]) var2.next();
+        } while (!Arrays.equals(password, existingPassword));
+
     }
 
     private static byte[] encodePassword(char[] pwd, Charset cs) throws IOException {
@@ -132,69 +173,74 @@ public class PasswordRetriever implements AutoCloseable {
     private static char[] castBytesToChars(byte[] bytes) {
         if (bytes == null) {
             return null;
+        } else {
+            char[] chars = new char[bytes.length];
+
+            for (int i = 0; i < bytes.length; ++i) {
+                chars[i] = (char) (bytes[i] & 255);
+            }
+
+            return chars;
         }
-        char[] chars = new char[bytes.length];
-        for (int i = 0; i < bytes.length; i++) {
-            chars[i] = (char) (bytes[i] & 255);
-        }
-        return chars;
     }
 
     private static boolean isJava9OrHigherErrOnTheSideOfCaution() {
         String versionString = System.getProperty("java.specification.version");
-        if (versionString != null && versionString.startsWith("1.")) {
-            return false;
+        if (versionString == null) {
+            return true;
+        } else {
+            return !versionString.startsWith("1.");
         }
-        return true;
     }
 
     private static Charset getConsoleEncoding() {
         if (isJava9OrHigherErrOnTheSideOfCaution()) {
             return null;
-        }
-        try {
-            Method encodingMethod = Console.class.getDeclaredMethod("encoding", new Class[0]);
-            encodingMethod.setAccessible(true);
-            String consoleCharsetName = (String) encodingMethod.invoke(null, new Object[0]);
-            if (consoleCharsetName == null) {
-                return Charset.defaultCharset();
-            }
+        } else {
+            String consoleCharsetName = null;
+
             try {
-                return getCharsetByName(consoleCharsetName);
-            } catch (IllegalArgumentException e) {
+                Method encodingMethod = Console.class.getDeclaredMethod("encoding");
+                encodingMethod.setAccessible(true);
+                consoleCharsetName = (String) encodingMethod.invoke((Object) null);
+            } catch (ReflectiveOperationException var3) {
                 return null;
             }
-        } catch (ReflectiveOperationException e2) {
-            return null;
+
+            if (consoleCharsetName == null) {
+                return Charset.defaultCharset();
+            } else {
+                try {
+                    return getCharsetByName(consoleCharsetName);
+                } catch (IllegalArgumentException var2) {
+                    return null;
+                }
+            }
         }
     }
 
     public static Charset getCharsetByName(String charsetName) throws IllegalArgumentException {
-        if ("cp65001".equalsIgnoreCase(charsetName)) {
-            return StandardCharsets.UTF_8;
-        }
-        return Charset.forName(charsetName);
+        return "cp65001".equalsIgnoreCase(charsetName) ? StandardCharsets.UTF_8 : Charset.forName(charsetName);
     }
 
     private static byte[] readEncodedPassword(InputStream in) throws IOException {
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-        while (true) {
-            int b = in.read();
-            if (b == -1 || b == 10) {
-                break;
-            }
+        ByteArrayOutputStream result;
+        int b;
+        for (result = new ByteArrayOutputStream(); (b = ((InputStream) in).read()) != -1 && b != 10; result.write(b)) {
             if (b == 13) {
-                int next = in.read();
+                int next = ((InputStream) in).read();
                 if (next == -1 || next == 10) {
                     break;
                 }
+
                 if (!(in instanceof PushbackInputStream)) {
-                    in = new PushbackInputStream(in);
+                    in = new PushbackInputStream((InputStream) in);
                 }
+
                 ((PushbackInputStream) in).unread(next);
             }
-            result.write(b);
         }
+
         return result.toByteArray();
     }
 
@@ -204,14 +250,18 @@ public class PasswordRetriever implements AutoCloseable {
         }
     }
 
-    @Override // java.lang.AutoCloseable
     public void close() {
-        for (InputStream in : this.mFileInputStreams.values()) {
+        Iterator var1 = this.mFileInputStreams.values().iterator();
+
+        while (var1.hasNext()) {
+            InputStream in = (InputStream) var1.next();
+
             try {
                 in.close();
-            } catch (IOException e) {
+            } catch (IOException var4) {
             }
         }
+
         this.mFileInputStreams.clear();
         this.mClosed = true;
     }

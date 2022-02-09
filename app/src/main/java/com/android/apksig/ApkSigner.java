@@ -1,13 +1,27 @@
+/*
+ * Copyright (C) 2016 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.android.apksig;
 
-import com.android.apksig.ApkSignerEngine;
-import com.android.apksig.DefaultApkSignerEngine;
-import com.android.apksig.Hints;
+import static com.android.apksig.apk.ApkUtils.SOURCE_STAMP_CERTIFICATE_HASH_ZIP_ENTRY_NAME;
+
 import com.android.apksig.apk.ApkFormatException;
 import com.android.apksig.apk.ApkSigningBlockNotFoundException;
 import com.android.apksig.apk.ApkUtils;
 import com.android.apksig.apk.MinSdkVersionException;
-import com.android.apksig.internal.apk.ApkSigningBlockUtils;
 import com.android.apksig.internal.util.ByteBufferDataSource;
 import com.android.apksig.internal.zip.CentralDirectoryRecord;
 import com.android.apksig.internal.zip.EocdRecord;
@@ -19,6 +33,7 @@ import com.android.apksig.util.DataSource;
 import com.android.apksig.util.DataSources;
 import com.android.apksig.util.ReadableDataSink;
 import com.android.apksig.zip.ZipFormatException;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -31,7 +46,6 @@ import java.security.PrivateKey;
 import java.security.SignatureException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,81 +53,148 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * APK signer.
+ *
+ * <p>The signer preserves as much of the input APK as possible. For example, it preserves the order
+ * of APK entries and preserves their contents, including compressed form and alignment of data.
+ *
+ * <p>Use {@link Builder} to obtain instances of this signer.
+ *
+ * @see <a href="https://source.android.com/security/apksigning/index.html">Application Signing</a>
+ */
 public class ApkSigner {
-    private static final short ALIGNMENT_ZIP_EXTRA_DATA_FIELD_HEADER_ID = -9931;
+
+    /**
+     * Extensible data block/field header ID used for storing information about alignment of
+     * uncompressed entries as well as for aligning the entries's data. See ZIP appnote.txt section
+     * 4.5 Extensible data fields.
+     */
+    private static final short ALIGNMENT_ZIP_EXTRA_DATA_FIELD_HEADER_ID = (short) 0xd935;
+
+    /**
+     * Minimum size (in bytes) of the extensible data block/field used for alignment of uncompressed
+     * entries.
+     */
     private static final short ALIGNMENT_ZIP_EXTRA_DATA_FIELD_MIN_SIZE_BYTES = 6;
+
     private static final short ANDROID_COMMON_PAGE_ALIGNMENT_BYTES = 4096;
+
+    /**
+     * Name of the Android manifest ZIP entry in APKs.
+     */
     private static final String ANDROID_MANIFEST_ZIP_ENTRY_NAME = "AndroidManifest.xml";
-    private final String mCreatedBy;
-    private final boolean mDebuggableApkPermitted;
-    private final boolean mForceSourceStampOverwrite;
-    private final DataSource mInputApkDataSource;
-    private final File mInputApkFile;
-    private final Integer mMinSdkVersion;
-    private final boolean mOtherSignersSignaturesPreserved;
-    private final DataSink mOutputApkDataSink;
-    private final DataSource mOutputApkDataSource;
-    private final File mOutputApkFile;
-    private final File mOutputV4File;
+
     private final List<SignerConfig> mSignerConfigs;
-    private final ApkSignerEngine mSignerEngine;
-    private final SigningCertificateLineage mSigningCertificateLineage;
     private final SignerConfig mSourceStampSignerConfig;
-    private final SigningCertificateLineage mSourceStampSigningCertificateLineage;
+    private final Integer mMinSdkVersion;
     private final boolean mV1SigningEnabled;
     private final boolean mV2SigningEnabled;
     private final boolean mV3SigningEnabled;
-    private final boolean mV4ErrorReportingEnabled;
     private final boolean mV4SigningEnabled;
-    private final boolean mVerityEnabled;
+    private final boolean mV4ErrorReportingEnabled;
+    private final boolean mDebuggableApkPermitted;
+    private final boolean mOtherSignersSignaturesPreserved;
+    private final String mCreatedBy;
 
-    private ApkSigner(List<SignerConfig> signerConfigs, SignerConfig sourceStampSignerConfig, SigningCertificateLineage sourceStampSigningCertificateLineage, boolean forceSourceStampOverwrite, Integer minSdkVersion, boolean v1SigningEnabled, boolean v2SigningEnabled, boolean v3SigningEnabled, boolean v4SigningEnabled, boolean verityEnabled, boolean v4ErrorReportingEnabled, boolean debuggableApkPermitted, boolean otherSignersSignaturesPreserved, String createdBy, ApkSignerEngine signerEngine, File inputApkFile, DataSource inputApkDataSource, File outputApkFile, DataSink outputApkDataSink, DataSource outputApkDataSource, File outputV4File, SigningCertificateLineage signingCertificateLineage) {
-        this.mSignerConfigs = signerConfigs;
-        this.mSourceStampSignerConfig = sourceStampSignerConfig;
-        this.mSourceStampSigningCertificateLineage = sourceStampSigningCertificateLineage;
-        this.mForceSourceStampOverwrite = forceSourceStampOverwrite;
-        this.mMinSdkVersion = minSdkVersion;
-        this.mV1SigningEnabled = v1SigningEnabled;
-        this.mV2SigningEnabled = v2SigningEnabled;
-        this.mV3SigningEnabled = v3SigningEnabled;
-        this.mV4SigningEnabled = v4SigningEnabled;
-        this.mVerityEnabled = verityEnabled;
-        this.mV4ErrorReportingEnabled = v4ErrorReportingEnabled;
-        this.mDebuggableApkPermitted = debuggableApkPermitted;
-        this.mOtherSignersSignaturesPreserved = otherSignersSignaturesPreserved;
-        this.mCreatedBy = createdBy;
-        this.mSignerEngine = signerEngine;
-        this.mInputApkFile = inputApkFile;
-        this.mInputApkDataSource = inputApkDataSource;
-        this.mOutputApkFile = outputApkFile;
-        this.mOutputApkDataSink = outputApkDataSink;
-        this.mOutputApkDataSource = outputApkDataSource;
-        this.mOutputV4File = outputV4File;
-        this.mSigningCertificateLineage = signingCertificateLineage;
+    private final ApkSignerEngine mSignerEngine;
+
+    private final File mInputApkFile;
+    private final DataSource mInputApkDataSource;
+
+    private final File mOutputApkFile;
+    private final DataSink mOutputApkDataSink;
+    private final DataSource mOutputApkDataSource;
+
+    private final File mOutputV4File;
+
+    private final SigningCertificateLineage mSigningCertificateLineage;
+
+    private ApkSigner(
+            List<SignerConfig> signerConfigs,
+            SignerConfig sourceStampSignerConfig,
+            Integer minSdkVersion,
+            boolean v1SigningEnabled,
+            boolean v2SigningEnabled,
+            boolean v3SigningEnabled,
+            boolean v4SigningEnabled,
+            boolean v4ErrorReportingEnabled,
+            boolean debuggableApkPermitted,
+            boolean otherSignersSignaturesPreserved,
+            String createdBy,
+            ApkSignerEngine signerEngine,
+            File inputApkFile,
+            DataSource inputApkDataSource,
+            File outputApkFile,
+            DataSink outputApkDataSink,
+            DataSource outputApkDataSource,
+            File outputV4File,
+            SigningCertificateLineage signingCertificateLineage) {
+
+        mSignerConfigs = signerConfigs;
+        mSourceStampSignerConfig = sourceStampSignerConfig;
+        mMinSdkVersion = minSdkVersion;
+        mV1SigningEnabled = v1SigningEnabled;
+        mV2SigningEnabled = v2SigningEnabled;
+        mV3SigningEnabled = v3SigningEnabled;
+        mV4SigningEnabled = v4SigningEnabled;
+        mV4ErrorReportingEnabled = v4ErrorReportingEnabled;
+        mDebuggableApkPermitted = debuggableApkPermitted;
+        mOtherSignersSignaturesPreserved = otherSignersSignaturesPreserved;
+        mCreatedBy = createdBy;
+
+        mSignerEngine = signerEngine;
+
+        mInputApkFile = inputApkFile;
+        mInputApkDataSource = inputApkDataSource;
+
+        mOutputApkFile = outputApkFile;
+        mOutputApkDataSink = outputApkDataSink;
+        mOutputApkDataSource = outputApkDataSource;
+
+        mOutputV4File = outputV4File;
+
+        mSigningCertificateLineage = signingCertificateLineage;
     }
 
-    public void sign() throws IOException, ApkFormatException, NoSuchAlgorithmException, InvalidKeyException, SignatureException, IllegalStateException {
-        DataSource inputApk;
-        DataSink outputApkOut;
-        DataSource outputApkIn;
+    /**
+     * Signs the input APK and outputs the resulting signed APK. The input APK is not modified.
+     *
+     * @throws IOException              if an I/O error is encountered while reading or writing the APKs
+     * @throws ApkFormatException       if the input APK is malformed
+     * @throws NoSuchAlgorithmException if the APK signatures cannot be produced or verified because
+     *                                  a required cryptographic algorithm implementation is missing
+     * @throws InvalidKeyException      if a signature could not be generated because a signing key is
+     *                                  not suitable for generating the signature
+     * @throws SignatureException       if an error occurred while generating or verifying a signature
+     * @throws IllegalStateException    if this signer's configuration is missing required information
+     *                                  or if the signing engine is in an invalid state.
+     */
+    public void sign()
+            throws IOException, ApkFormatException, NoSuchAlgorithmException, InvalidKeyException,
+            SignatureException, IllegalStateException {
         Closeable in = null;
+        DataSource inputApk;
         try {
-            if (this.mInputApkDataSource != null) {
-                inputApk = this.mInputApkDataSource;
-            } else if (this.mInputApkFile != null) {
-                RandomAccessFile inputFile = new RandomAccessFile(this.mInputApkFile, "r");
+            if (mInputApkDataSource != null) {
+                inputApk = mInputApkDataSource;
+            } else if (mInputApkFile != null) {
+                RandomAccessFile inputFile = new RandomAccessFile(mInputApkFile, "r");
                 in = inputFile;
                 inputApk = DataSources.asDataSource(inputFile);
             } else {
                 throw new IllegalStateException("Input APK not specified");
             }
+
             Closeable out = null;
             try {
-                if (this.mOutputApkDataSink != null) {
-                    outputApkOut = this.mOutputApkDataSink;
-                    outputApkIn = this.mOutputApkDataSource;
-                } else if (this.mOutputApkFile != null) {
-                    RandomAccessFile outputFile = new RandomAccessFile(this.mOutputApkFile, "rw");
+                DataSink outputApkOut;
+                DataSource outputApkIn;
+                if (mOutputApkDataSink != null) {
+                    outputApkOut = mOutputApkDataSink;
+                    outputApkIn = mOutputApkDataSource;
+                } else if (mOutputApkFile != null) {
+                    RandomAccessFile outputFile = new RandomAccessFile(mOutputApkFile, "rw");
                     out = outputFile;
                     outputFile.setLength(0);
                     outputApkOut = DataSinks.asDataSink(outputFile);
@@ -121,10 +202,8 @@ public class ApkSigner {
                 } else {
                     throw new IllegalStateException("Output APK not specified");
                 }
+
                 sign(inputApk, outputApkOut, outputApkIn);
-                if (in != null) {
-                    in.close();
-                }
             } finally {
                 if (out != null) {
                     out.close();
@@ -137,355 +216,632 @@ public class ApkSigner {
         }
     }
 
-    /* JADX WARN: Multi-variable type inference failed */
-    private void sign(DataSource inputApk, DataSink outputApkOut, DataSource outputApkIn) throws IOException, ApkFormatException, NoSuchAlgorithmException, InvalidKeyException, SignatureException {
-        int minSdkVersion;
-        ApkSignerEngine signerEngine;
-        boolean shouldOutput;
-        CentralDirectoryRecord outputCdRecord;
-        Hints.ByteRange pinRange;
+    private void sign(DataSource inputApk, DataSink outputApkOut, DataSource outputApkIn)
+            throws IOException, ApkFormatException, NoSuchAlgorithmException, InvalidKeyException,
+            SignatureException {
+        // Step 1. Find input APK's main ZIP sections
+        ApkUtils.ZipSections inputZipSections;
         try {
-            ApkUtils.ZipSections inputZipSections = ApkUtils.findZipSections(inputApk);
-            long inputApkSigningBlockOffset = -1;
-            DataSource inputApkSigningBlock = null;
-            try {
-                ApkUtils.ApkSigningBlock apkSigningBlockInfo = ApkUtils.findApkSigningBlock(inputApk, inputZipSections);
-                inputApkSigningBlockOffset = apkSigningBlockInfo.getStartOffset();
-                inputApkSigningBlock = apkSigningBlockInfo.getContents();
-            } catch (ApkSigningBlockNotFoundException e) {
-            }
-            if (inputApkSigningBlockOffset == -1) {
-                inputApkSigningBlockOffset = inputZipSections.getZipCentralDirectoryOffset();
-            }
-            DataSource inputApkLfhSection = inputApk.slice(0, inputApkSigningBlockOffset);
-            List<CentralDirectoryRecord> inputCdRecords = parseZipCentralDirectory(getZipCentralDirectory(inputApk, inputZipSections), inputZipSections);
-            List<Hints.PatternWithRange> pinPatterns = extractPinPatterns(inputCdRecords, inputApkLfhSection);
-            List<Hints.ByteRange> pinByteRanges = pinPatterns == null ? null : new ArrayList<>();
-            if (this.mSignerEngine != null) {
-                signerEngine = this.mSignerEngine;
+            inputZipSections = ApkUtils.findZipSections(inputApk);
+        } catch (ZipFormatException e) {
+            throw new ApkFormatException("Malformed APK: not a ZIP archive", e);
+        }
+        long inputApkSigningBlockOffset = -1;
+        DataSource inputApkSigningBlock = null;
+        try {
+            ApkUtils.ApkSigningBlock apkSigningBlockInfo =
+                    ApkUtils.findApkSigningBlock(inputApk, inputZipSections);
+            inputApkSigningBlockOffset = apkSigningBlockInfo.getStartOffset();
+            inputApkSigningBlock = apkSigningBlockInfo.getContents();
+        } catch (ApkSigningBlockNotFoundException e) {
+            // Input APK does not contain an APK Signing Block. That's OK. APKs are not required to
+            // contain this block. It's only needed if the APK is signed using APK Signature Scheme
+            // v2 and/or v3.
+        }
+        DataSource inputApkLfhSection =
+                inputApk.slice(
+                        0,
+                        (inputApkSigningBlockOffset != -1)
+                                ? inputApkSigningBlockOffset
+                                : inputZipSections.getZipCentralDirectoryOffset());
+
+        // Step 2. Parse the input APK's ZIP Central Directory
+        ByteBuffer inputCd = getZipCentralDirectory(inputApk, inputZipSections);
+        List<CentralDirectoryRecord> inputCdRecords =
+                parseZipCentralDirectory(inputCd, inputZipSections);
+
+        List<Hints.PatternWithRange> pinPatterns =
+                extractPinPatterns(inputCdRecords, inputApkLfhSection);
+        List<Hints.ByteRange> pinByteRanges = pinPatterns == null ? null : new ArrayList<>();
+
+        // Step 3. Obtain a signer engine instance
+        ApkSignerEngine signerEngine;
+        if (mSignerEngine != null) {
+            // Use the provided signer engine
+            signerEngine = mSignerEngine;
+        } else {
+            // Construct a signer engine from the provided parameters
+            int minSdkVersion;
+            if (mMinSdkVersion != null) {
+                // No need to extract minSdkVersion from the APK's AndroidManifest.xml
+                minSdkVersion = mMinSdkVersion;
             } else {
-                if (this.mMinSdkVersion != null) {
-                    minSdkVersion = this.mMinSdkVersion.intValue();
-                } else {
-                    minSdkVersion = getMinSdkVersionFromApk(inputCdRecords, inputApkLfhSection);
-                }
-                List<DefaultApkSignerEngine.SignerConfig> engineSignerConfigs = new ArrayList<>(this.mSignerConfigs.size());
-                for (SignerConfig signerConfig : this.mSignerConfigs) {
-                    engineSignerConfigs.add(new DefaultApkSignerEngine.SignerConfig.Builder(signerConfig.getName(), signerConfig.getPrivateKey(), signerConfig.getCertificates()).build());
-                }
-                DefaultApkSignerEngine.Builder signerEngineBuilder = new DefaultApkSignerEngine.Builder(engineSignerConfigs, minSdkVersion).setV1SigningEnabled(this.mV1SigningEnabled).setV2SigningEnabled(this.mV2SigningEnabled).setV3SigningEnabled(this.mV3SigningEnabled).setVerityEnabled(this.mVerityEnabled).setDebuggableApkPermitted(this.mDebuggableApkPermitted).setOtherSignersSignaturesPreserved(this.mOtherSignersSignaturesPreserved).setSigningCertificateLineage(this.mSigningCertificateLineage);
-                if (this.mCreatedBy != null) {
-                    signerEngineBuilder.setCreatedBy(this.mCreatedBy);
-                }
-                if (this.mSourceStampSignerConfig != null) {
-                    signerEngineBuilder.setStampSignerConfig(new DefaultApkSignerEngine.SignerConfig.Builder(this.mSourceStampSignerConfig.getName(), this.mSourceStampSignerConfig.getPrivateKey(), this.mSourceStampSignerConfig.getCertificates()).build());
-                }
-                if (this.mSourceStampSigningCertificateLineage != null) {
-                    signerEngineBuilder.setSourceStampSigningCertificateLineage(this.mSourceStampSigningCertificateLineage);
-                }
-                signerEngine = signerEngineBuilder.build();
+                // Need to extract minSdkVersion from the APK's AndroidManifest.xml
+                minSdkVersion = getMinSdkVersionFromApk(inputCdRecords, inputApkLfhSection);
             }
-            if (inputApkSigningBlock != null) {
-                signerEngine.inputApkSigningBlock(inputApkSigningBlock);
+            List<DefaultApkSignerEngine.SignerConfig> engineSignerConfigs =
+                    new ArrayList<>(mSignerConfigs.size());
+            for (SignerConfig signerConfig : mSignerConfigs) {
+                engineSignerConfigs.add(
+                        new DefaultApkSignerEngine.SignerConfig.Builder(
+                                signerConfig.getName(),
+                                signerConfig.getPrivateKey(),
+                                signerConfig.getCertificates())
+                                .build());
             }
-            List<CentralDirectoryRecord> inputCdRecordsSortedByLfhOffset = new ArrayList<>(inputCdRecords);
-            Collections.sort(inputCdRecordsSortedByLfhOffset, CentralDirectoryRecord.BY_LOCAL_FILE_HEADER_OFFSET_COMPARATOR);
-            int lastModifiedDateForNewEntries = -1;
-            int lastModifiedTimeForNewEntries = -1;
-            long inputOffset = 0;
-            long outputOffset = 0;
-            byte[] sourceStampCertificateDigest = null;
-            Map<String, CentralDirectoryRecord> outputCdRecordsByName = new HashMap<>(inputCdRecords.size());
-            for (CentralDirectoryRecord inputCdRecord : inputCdRecordsSortedByLfhOffset) {
-                String entryName = inputCdRecord.getName();
-                if (!Hints.PIN_BYTE_RANGE_ZIP_ENTRY_NAME.equals(entryName)) {
-                    if ("stamp-cert-sha256".equals(entryName)) {
-                        try {
-                            sourceStampCertificateDigest = LocalFileRecord.getUncompressedData(inputApkLfhSection, inputCdRecord, inputApkLfhSection.size());
-                        } catch (ZipFormatException e2) {
-                            throw new ApkFormatException("Bad source stamp entry");
-                        }
-                    } else {
-                        ApkSignerEngine.InputJarEntryInstructions entryInstructions = signerEngine.inputJarEntry(entryName);
-                        switch (entryInstructions.getOutputPolicy()) {
-                            case OUTPUT:
-                                shouldOutput = true;
-                                break;
-                            case OUTPUT_BY_ENGINE:
-                            case SKIP:
-                                shouldOutput = false;
-                                break;
-                            default:
-                                throw new RuntimeException("Unknown output policy: " + entryInstructions.getOutputPolicy());
-                        }
-                        long inputLocalFileHeaderStartOffset = inputCdRecord.getLocalFileHeaderOffset();
-                        if (inputLocalFileHeaderStartOffset > inputOffset) {
-                            long chunkSize = inputLocalFileHeaderStartOffset - inputOffset;
-                            inputApkLfhSection.feed(inputOffset, chunkSize, outputApkOut);
-                            outputOffset += chunkSize;
-                            inputOffset = inputLocalFileHeaderStartOffset;
-                        }
-                        try {
-                            LocalFileRecord inputLocalFileRecord = LocalFileRecord.getRecord(inputApkLfhSection, inputCdRecord, inputApkLfhSection.size());
-                            inputOffset += inputLocalFileRecord.getSize();
-                            ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest = entryInstructions.getInspectJarEntryRequest();
-                            if (inspectEntryRequest != null) {
-                                fulfillInspectInputJarEntryRequest(inputApkLfhSection, inputLocalFileRecord, inspectEntryRequest);
+            DefaultApkSignerEngine.Builder signerEngineBuilder =
+                    new DefaultApkSignerEngine.Builder(engineSignerConfigs, minSdkVersion)
+                            .setV1SigningEnabled(mV1SigningEnabled)
+                            .setV2SigningEnabled(mV2SigningEnabled)
+                            .setV3SigningEnabled(mV3SigningEnabled)
+                            .setDebuggableApkPermitted(mDebuggableApkPermitted)
+                            .setOtherSignersSignaturesPreserved(mOtherSignersSignaturesPreserved)
+                            .setSigningCertificateLineage(mSigningCertificateLineage);
+            if (mCreatedBy != null) {
+                signerEngineBuilder.setCreatedBy(mCreatedBy);
+            }
+            if (mSourceStampSignerConfig != null) {
+                signerEngineBuilder.setStampSignerConfig(
+                        new DefaultApkSignerEngine.SignerConfig.Builder(
+                                mSourceStampSignerConfig.getName(),
+                                mSourceStampSignerConfig.getPrivateKey(),
+                                mSourceStampSignerConfig.getCertificates())
+                                .build());
+            }
+            signerEngine = signerEngineBuilder.build();
+        }
+
+        // Step 4. Provide the signer engine with the input APK's APK Signing Block (if any)
+        if (inputApkSigningBlock != null) {
+            signerEngine.inputApkSigningBlock(inputApkSigningBlock);
+        }
+
+        // Step 5. Iterate over input APK's entries and output the Local File Header + data of those
+        // entries which need to be output. Entries are iterated in the order in which their Local
+        // File Header records are stored in the file. This is to achieve better data locality in
+        // case Central Directory entries are in the wrong order.
+        List<CentralDirectoryRecord> inputCdRecordsSortedByLfhOffset =
+                new ArrayList<>(inputCdRecords);
+        Collections.sort(
+                inputCdRecordsSortedByLfhOffset,
+                CentralDirectoryRecord.BY_LOCAL_FILE_HEADER_OFFSET_COMPARATOR);
+        int lastModifiedDateForNewEntries = -1;
+        int lastModifiedTimeForNewEntries = -1;
+        long inputOffset = 0;
+        long outputOffset = 0;
+        Map<String, CentralDirectoryRecord> outputCdRecordsByName =
+                new HashMap<>(inputCdRecords.size());
+        for (final CentralDirectoryRecord inputCdRecord : inputCdRecordsSortedByLfhOffset) {
+            String entryName = inputCdRecord.getName();
+            if (Hints.PIN_BYTE_RANGE_ZIP_ENTRY_NAME.equals(entryName)) {
+                continue; // We'll re-add below if needed.
+            }
+            ApkSignerEngine.InputJarEntryInstructions entryInstructions =
+                    signerEngine.inputJarEntry(entryName);
+            boolean shouldOutput;
+            switch (entryInstructions.getOutputPolicy()) {
+                case OUTPUT:
+                    shouldOutput = true;
+                    break;
+                case OUTPUT_BY_ENGINE:
+                case SKIP:
+                    shouldOutput = false;
+                    break;
+                default:
+                    throw new RuntimeException(
+                            "Unknown output policy: " + entryInstructions.getOutputPolicy());
+            }
+
+            long inputLocalFileHeaderStartOffset = inputCdRecord.getLocalFileHeaderOffset();
+            if (inputLocalFileHeaderStartOffset > inputOffset) {
+                // Unprocessed data in input starting at inputOffset and ending and the start of
+                // this record's LFH. We output this data verbatim because this signer is supposed
+                // to preserve as much of input as possible.
+                long chunkSize = inputLocalFileHeaderStartOffset - inputOffset;
+                inputApkLfhSection.feed(inputOffset, chunkSize, outputApkOut);
+                outputOffset += chunkSize;
+                inputOffset = inputLocalFileHeaderStartOffset;
+            }
+            LocalFileRecord inputLocalFileRecord;
+            try {
+                inputLocalFileRecord =
+                        LocalFileRecord.getRecord(
+                                inputApkLfhSection, inputCdRecord, inputApkLfhSection.size());
+            } catch (ZipFormatException e) {
+                throw new ApkFormatException("Malformed ZIP entry: " + inputCdRecord.getName(), e);
+            }
+            inputOffset += inputLocalFileRecord.getSize();
+
+            ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest =
+                    entryInstructions.getInspectJarEntryRequest();
+            if (inspectEntryRequest != null) {
+                fulfillInspectInputJarEntryRequest(
+                        inputApkLfhSection, inputLocalFileRecord, inspectEntryRequest);
+            }
+
+            if (shouldOutput) {
+                // Find the max value of last modified, to be used for new entries added by the
+                // signer.
+                int lastModifiedDate = inputCdRecord.getLastModificationDate();
+                int lastModifiedTime = inputCdRecord.getLastModificationTime();
+                if ((lastModifiedDateForNewEntries == -1)
+                        || (lastModifiedDate > lastModifiedDateForNewEntries)
+                        || ((lastModifiedDate == lastModifiedDateForNewEntries)
+                        && (lastModifiedTime > lastModifiedTimeForNewEntries))) {
+                    lastModifiedDateForNewEntries = lastModifiedDate;
+                    lastModifiedTimeForNewEntries = lastModifiedTime;
+                }
+
+                inspectEntryRequest = signerEngine.outputJarEntry(entryName);
+                if (inspectEntryRequest != null) {
+                    fulfillInspectInputJarEntryRequest(
+                            inputApkLfhSection, inputLocalFileRecord, inspectEntryRequest);
+                }
+
+                // Output entry's Local File Header + data
+                long outputLocalFileHeaderOffset = outputOffset;
+                OutputSizeAndDataOffset outputLfrResult =
+                        outputInputJarEntryLfhRecordPreservingDataAlignment(
+                                inputApkLfhSection,
+                                inputLocalFileRecord,
+                                outputApkOut,
+                                outputLocalFileHeaderOffset);
+                outputOffset += outputLfrResult.outputBytes;
+                long outputDataOffset =
+                        outputLocalFileHeaderOffset + outputLfrResult.dataOffsetBytes;
+
+                if (pinPatterns != null) {
+                    boolean pinFileHeader = false;
+                    for (Hints.PatternWithRange pinPattern : pinPatterns) {
+                        if (pinPattern.matcher(inputCdRecord.getName()).matches()) {
+                            Hints.ByteRange dataRange =
+                                    new Hints.ByteRange(outputDataOffset, outputOffset);
+                            Hints.ByteRange pinRange =
+                                    pinPattern.ClampToAbsoluteByteRange(dataRange);
+                            if (pinRange != null) {
+                                pinFileHeader = true;
+                                pinByteRanges.add(pinRange);
                             }
-                            if (shouldOutput) {
-                                int lastModifiedDate = inputCdRecord.getLastModificationDate();
-                                int lastModifiedTime = inputCdRecord.getLastModificationTime();
-                                if (lastModifiedDateForNewEntries == -1 || lastModifiedDate > lastModifiedDateForNewEntries || (lastModifiedDate == lastModifiedDateForNewEntries && lastModifiedTime > lastModifiedTimeForNewEntries)) {
-                                    lastModifiedDateForNewEntries = lastModifiedDate;
-                                    lastModifiedTimeForNewEntries = lastModifiedTime;
-                                }
-                                ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest2 = signerEngine.outputJarEntry(entryName);
-                                if (inspectEntryRequest2 != null) {
-                                    fulfillInspectInputJarEntryRequest(inputApkLfhSection, inputLocalFileRecord, inspectEntryRequest2);
-                                }
-                                OutputSizeAndDataOffset outputLfrResult = outputInputJarEntryLfhRecordPreservingDataAlignment(inputApkLfhSection, inputLocalFileRecord, outputApkOut, outputOffset);
-                                outputOffset += outputLfrResult.outputBytes;
-                                long outputDataOffset = outputOffset + outputLfrResult.dataOffsetBytes;
-                                if (pinPatterns != null) {
-                                    boolean pinFileHeader = false;
-                                    for (Hints.PatternWithRange pinPattern : pinPatterns) {
-                                        if (pinPattern.matcher(inputCdRecord.getName()).matches() && (pinRange = pinPattern.ClampToAbsoluteByteRange(new Hints.ByteRange(outputDataOffset, outputOffset))) != null) {
-                                            pinFileHeader = true;
-                                            pinByteRanges.add(pinRange);
-                                        }
-                                    }
-                                    if (pinFileHeader) {
-                                        pinByteRanges.add(new Hints.ByteRange(outputOffset, outputDataOffset));
-                                    }
-                                }
-                                if (outputOffset == inputLocalFileRecord.getStartOffsetInArchive()) {
-                                    outputCdRecord = inputCdRecord;
-                                } else {
-                                    outputCdRecord = inputCdRecord.createWithModifiedLocalFileHeaderOffset(outputOffset);
-                                }
-                                outputCdRecordsByName.put(entryName, outputCdRecord);
-                            }
-                        } catch (ZipFormatException e3) {
-                            throw new ApkFormatException("Malformed ZIP entry: " + inputCdRecord.getName(), e3);
                         }
                     }
-                }
-            }
-            long inputLfhSectionSize = inputApkLfhSection.size();
-            if (inputOffset < inputLfhSectionSize) {
-                long chunkSize2 = inputLfhSectionSize - inputOffset;
-                inputApkLfhSection.feed(inputOffset, chunkSize2, outputApkOut);
-                outputOffset += chunkSize2;
-            }
-            List<CentralDirectoryRecord> outputCdRecords = new ArrayList<>(inputCdRecords.size() + 10);
-            for (CentralDirectoryRecord inputCdRecord2 : inputCdRecords) {
-                CentralDirectoryRecord outputCdRecord2 = outputCdRecordsByName.get(inputCdRecord2.getName());
-                if (outputCdRecord2 != null) {
-                    outputCdRecords.add(outputCdRecord2);
-                }
-            }
-            if (lastModifiedDateForNewEntries == -1) {
-                lastModifiedDateForNewEntries = 14881;
-                lastModifiedTimeForNewEntries = 0;
-            }
-            if (signerEngine.isEligibleForSourceStamp()) {
-                byte[] uncompressedData = signerEngine.generateSourceStampCertificateDigest();
-                if (this.mForceSourceStampOverwrite || sourceStampCertificateDigest == null || Arrays.equals(uncompressedData, sourceStampCertificateDigest)) {
-                    outputOffset += outputDataToOutputApk("stamp-cert-sha256", uncompressedData, outputOffset, outputCdRecords, lastModifiedTimeForNewEntries, lastModifiedDateForNewEntries, outputApkOut);
-                } else {
-                    throw new ApkFormatException(String.format("Cannot generate SourceStamp. APK contains an existing entry with the name: %s, and it is different than the provided source stamp certificate", "stamp-cert-sha256"));
-                }
-            }
-            ApkSignerEngine.OutputJarSignatureRequest outputJarSignatureRequest = signerEngine.outputJarEntries();
-            if (outputJarSignatureRequest != null) {
-                for (ApkSignerEngine.OutputJarSignatureRequest.JarEntry entry : outputJarSignatureRequest.getAdditionalJarEntries()) {
-                    String entryName2 = entry.getName();
-                    byte[] uncompressedData2 = entry.getData();
-                    ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest3 = signerEngine.outputJarEntry(entryName2);
-                    if (inspectEntryRequest3 != null) {
-                        inspectEntryRequest3.getDataSink().consume(uncompressedData2, 0, uncompressedData2.length);
-                        inspectEntryRequest3.done();
+                    if (pinFileHeader) {
+                        pinByteRanges.add(
+                                new Hints.ByteRange(outputLocalFileHeaderOffset, outputDataOffset));
                     }
-                    outputOffset += outputDataToOutputApk(entryName2, uncompressedData2, outputOffset, outputCdRecords, lastModifiedTimeForNewEntries, lastModifiedDateForNewEntries, outputApkOut);
                 }
-                outputJarSignatureRequest.done();
+
+                // Enqueue entry's Central Directory record for output
+                CentralDirectoryRecord outputCdRecord;
+                if (outputLocalFileHeaderOffset == inputLocalFileRecord.getStartOffsetInArchive()) {
+                    outputCdRecord = inputCdRecord;
+                } else {
+                    outputCdRecord =
+                            inputCdRecord.createWithModifiedLocalFileHeaderOffset(
+                                    outputLocalFileHeaderOffset);
+                }
+                outputCdRecordsByName.put(entryName, outputCdRecord);
             }
-            if (pinByteRanges != null) {
-                pinByteRanges.add(new Hints.ByteRange(outputOffset, Long.MAX_VALUE));
-                outputOffset += outputDataToOutputApk(Hints.PIN_BYTE_RANGE_ZIP_ENTRY_NAME, Hints.encodeByteRangeList(pinByteRanges), outputOffset, outputCdRecords, lastModifiedTimeForNewEntries, lastModifiedDateForNewEntries, outputApkOut);
+        }
+        long inputLfhSectionSize = inputApkLfhSection.size();
+        if (inputOffset < inputLfhSectionSize) {
+            // Unprocessed data in input starting at inputOffset and ending and the end of the input
+            // APK's LFH section. We output this data verbatim because this signer is supposed
+            // to preserve as much of input as possible.
+            long chunkSize = inputLfhSectionSize - inputOffset;
+            inputApkLfhSection.feed(inputOffset, chunkSize, outputApkOut);
+            outputOffset += chunkSize;
+            inputOffset = inputLfhSectionSize;
+        }
+
+        // Step 6. Sort output APK's Central Directory records in the order in which they should
+        // appear in the output
+        List<CentralDirectoryRecord> outputCdRecords = new ArrayList<>(inputCdRecords.size() + 10);
+        for (CentralDirectoryRecord inputCdRecord : inputCdRecords) {
+            String entryName = inputCdRecord.getName();
+            CentralDirectoryRecord outputCdRecord = outputCdRecordsByName.get(entryName);
+            if (outputCdRecord != null) {
+                outputCdRecords.add(outputCdRecord);
             }
-            long outputCentralDirSizeBytes = 0;
-            for (CentralDirectoryRecord record : outputCdRecords) {
-                outputCentralDirSizeBytes += (long) record.getSize();
+        }
+
+        if (lastModifiedDateForNewEntries == -1) {
+            lastModifiedDateForNewEntries = 0x3a21; // Jan 1 2009 (DOS)
+            lastModifiedTimeForNewEntries = 0;
+        }
+
+        // Step 7. Generate and output SourceStamp certificate hash, if necessary. This may output
+        // more Local File Header + data entries and add to the list of output Central Directory
+        // records.
+        if (signerEngine.isEligibleForSourceStamp()) {
+            byte[] uncompressedData = signerEngine.generateSourceStampCertificateDigest();
+            outputOffset +=
+                    outputDataToOutputApk(
+                            SOURCE_STAMP_CERTIFICATE_HASH_ZIP_ENTRY_NAME,
+                            uncompressedData,
+                            outputOffset,
+                            outputCdRecords,
+                            lastModifiedTimeForNewEntries,
+                            lastModifiedDateForNewEntries,
+                            outputApkOut);
+        }
+
+        // Step 8. Generate and output JAR signatures, if necessary. This may output more Local File
+        // Header + data entries and add to the list of output Central Directory records.
+        ApkSignerEngine.OutputJarSignatureRequest outputJarSignatureRequest =
+                signerEngine.outputJarEntries();
+        if (outputJarSignatureRequest != null) {
+            for (ApkSignerEngine.OutputJarSignatureRequest.JarEntry entry :
+                    outputJarSignatureRequest.getAdditionalJarEntries()) {
+                String entryName = entry.getName();
+                byte[] uncompressedData = entry.getData();
+
+                ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest =
+                        signerEngine.outputJarEntry(entryName);
+                if (inspectEntryRequest != null) {
+                    inspectEntryRequest
+                            .getDataSink()
+                            .consume(uncompressedData, 0, uncompressedData.length);
+                    inspectEntryRequest.done();
+                }
+
+                outputOffset +=
+                        outputDataToOutputApk(
+                                entryName,
+                                uncompressedData,
+                                outputOffset,
+                                outputCdRecords,
+                                lastModifiedTimeForNewEntries,
+                                lastModifiedDateForNewEntries,
+                                outputApkOut);
             }
-            if (outputCentralDirSizeBytes > 2147483647L) {
-                throw new IOException("Output ZIP Central Directory too large: " + outputCentralDirSizeBytes + " bytes");
-            }
-            ByteBuffer outputCentralDir = ByteBuffer.allocate((int) outputCentralDirSizeBytes);
-            for (CentralDirectoryRecord record2 : outputCdRecords) {
-                record2.copyTo(outputCentralDir);
-            }
-            outputCentralDir.flip();
-            DataSource outputCentralDirDataSource = new ByteBufferDataSource(outputCentralDir);
-            ByteBuffer outputEocd = EocdRecord.createWithModifiedCentralDirectoryInfo(inputZipSections.getZipEndOfCentralDirectory(), outputCdRecords.size(), outputCentralDirDataSource.size(), outputOffset);
-            ApkSignerEngine.OutputApkSigningBlockRequest2 outputApkSigningBlockRequest = signerEngine.outputZipSections2(outputApkIn, outputCentralDirDataSource, DataSources.asDataSource(outputEocd));
-            if (outputApkSigningBlockRequest != null) {
-                int padding = outputApkSigningBlockRequest.getPaddingSizeBeforeApkSigningBlock();
-                outputApkOut.consume(ByteBuffer.allocate(padding));
-                byte[] outputApkSigningBlock = outputApkSigningBlockRequest.getApkSigningBlock();
-                outputApkOut.consume(outputApkSigningBlock, 0, outputApkSigningBlock.length);
-                ZipUtils.setZipEocdCentralDirectoryOffset(outputEocd, ((long) padding) + outputOffset + ((long) outputApkSigningBlock.length));
-                outputApkSigningBlockRequest.done();
-            }
-            outputCentralDirDataSource.feed(0, outputCentralDirDataSource.size(), outputApkOut);
-            outputApkOut.consume(outputEocd);
-            signerEngine.outputDone();
-            if (this.mV4SigningEnabled) {
-                signerEngine.signV4(outputApkIn, this.mOutputV4File, !this.mV4ErrorReportingEnabled);
-            }
-        } catch (ZipFormatException e4) {
-            throw new ApkFormatException("Malformed APK: not a ZIP archive", e4);
+            outputJarSignatureRequest.done();
+        }
+
+        if (pinByteRanges != null) {
+            pinByteRanges.add(new Hints.ByteRange(outputOffset, Long.MAX_VALUE)); // central dir
+            String entryName = Hints.PIN_BYTE_RANGE_ZIP_ENTRY_NAME;
+            byte[] uncompressedData = Hints.encodeByteRangeList(pinByteRanges);
+            outputOffset +=
+                    outputDataToOutputApk(
+                            entryName,
+                            uncompressedData,
+                            outputOffset,
+                            outputCdRecords,
+                            lastModifiedTimeForNewEntries,
+                            lastModifiedDateForNewEntries,
+                            outputApkOut);
+        }
+
+        // Step 9. Construct output ZIP Central Directory in an in-memory buffer
+        long outputCentralDirSizeBytes = 0;
+        for (CentralDirectoryRecord record : outputCdRecords) {
+            outputCentralDirSizeBytes += record.getSize();
+        }
+        if (outputCentralDirSizeBytes > Integer.MAX_VALUE) {
+            throw new IOException(
+                    "Output ZIP Central Directory too large: "
+                            + outputCentralDirSizeBytes
+                            + " bytes");
+        }
+        ByteBuffer outputCentralDir = ByteBuffer.allocate((int) outputCentralDirSizeBytes);
+        for (CentralDirectoryRecord record : outputCdRecords) {
+            record.copyTo(outputCentralDir);
+        }
+        outputCentralDir.flip();
+        DataSource outputCentralDirDataSource = new ByteBufferDataSource(outputCentralDir);
+        long outputCentralDirStartOffset = outputOffset;
+        int outputCentralDirRecordCount = outputCdRecords.size();
+
+        // Step 10. Construct output ZIP End of Central Directory record in an in-memory buffer
+        ByteBuffer outputEocd =
+                EocdRecord.createWithModifiedCentralDirectoryInfo(
+                        inputZipSections.getZipEndOfCentralDirectory(),
+                        outputCentralDirRecordCount,
+                        outputCentralDirDataSource.size(),
+                        outputCentralDirStartOffset);
+
+        // Step 11. Generate and output APK Signature Scheme v2 and/or v3 signatures and/or
+        // SourceStamp signatures, if necessary.
+        // This may insert an APK Signing Block just before the output's ZIP Central Directory
+        ApkSignerEngine.OutputApkSigningBlockRequest2 outputApkSigningBlockRequest =
+                signerEngine.outputZipSections2(
+                        outputApkIn,
+                        outputCentralDirDataSource,
+                        DataSources.asDataSource(outputEocd));
+
+        if (outputApkSigningBlockRequest != null) {
+            int padding = outputApkSigningBlockRequest.getPaddingSizeBeforeApkSigningBlock();
+            outputApkOut.consume(ByteBuffer.allocate(padding));
+            byte[] outputApkSigningBlock = outputApkSigningBlockRequest.getApkSigningBlock();
+            outputApkOut.consume(outputApkSigningBlock, 0, outputApkSigningBlock.length);
+            ZipUtils.setZipEocdCentralDirectoryOffset(
+                    outputEocd,
+                    outputCentralDirStartOffset + padding + outputApkSigningBlock.length);
+            outputApkSigningBlockRequest.done();
+        }
+
+        // Step 12. Output ZIP Central Directory and ZIP End of Central Directory
+        outputCentralDirDataSource.feed(0, outputCentralDirDataSource.size(), outputApkOut);
+        outputApkOut.consume(outputEocd);
+        signerEngine.outputDone();
+
+        // Step 13. Generate and output APK Signature Scheme v4 signatures, if necessary.
+        if (mV4SigningEnabled) {
+            signerEngine.signV4(outputApkIn, mOutputV4File, !mV4ErrorReportingEnabled);
         }
     }
 
-    private static long outputDataToOutputApk(String entryName, byte[] uncompressedData, long localFileHeaderOffset, List<CentralDirectoryRecord> outputCdRecords, int lastModifiedTimeForNewEntries, int lastModifiedDateForNewEntries, DataSink outputApkOut) throws IOException {
+    private static long outputDataToOutputApk(
+            String entryName,
+            byte[] uncompressedData,
+            long localFileHeaderOffset,
+            List<CentralDirectoryRecord> outputCdRecords,
+            int lastModifiedTimeForNewEntries,
+            int lastModifiedDateForNewEntries,
+            DataSink outputApkOut)
+            throws IOException {
         ZipUtils.DeflateResult deflateResult = ZipUtils.deflate(ByteBuffer.wrap(uncompressedData));
         byte[] compressedData = deflateResult.output;
         long uncompressedDataCrc32 = deflateResult.inputCrc32;
-        long numOfDataBytes = LocalFileRecord.outputRecordWithDeflateCompressedData(entryName, lastModifiedTimeForNewEntries, lastModifiedDateForNewEntries, compressedData, uncompressedDataCrc32, (long) uncompressedData.length, outputApkOut);
-        outputCdRecords.add(CentralDirectoryRecord.createWithDeflateCompressedData(entryName, lastModifiedTimeForNewEntries, lastModifiedDateForNewEntries, uncompressedDataCrc32, (long) compressedData.length, (long) uncompressedData.length, localFileHeaderOffset));
+        long numOfDataBytes =
+                LocalFileRecord.outputRecordWithDeflateCompressedData(
+                        entryName,
+                        lastModifiedTimeForNewEntries,
+                        lastModifiedDateForNewEntries,
+                        compressedData,
+                        uncompressedDataCrc32,
+                        uncompressedData.length,
+                        outputApkOut);
+        outputCdRecords.add(
+                CentralDirectoryRecord.createWithDeflateCompressedData(
+                        entryName,
+                        lastModifiedTimeForNewEntries,
+                        lastModifiedDateForNewEntries,
+                        uncompressedDataCrc32,
+                        compressedData.length,
+                        uncompressedData.length,
+                        localFileHeaderOffset));
         return numOfDataBytes;
     }
 
-    private static void fulfillInspectInputJarEntryRequest(DataSource lfhSection, LocalFileRecord localFileRecord, ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest) throws IOException, ApkFormatException {
+    private static void fulfillInspectInputJarEntryRequest(
+            DataSource lfhSection,
+            LocalFileRecord localFileRecord,
+            ApkSignerEngine.InspectJarEntryRequest inspectEntryRequest)
+            throws IOException, ApkFormatException {
         try {
             localFileRecord.outputUncompressedData(lfhSection, inspectEntryRequest.getDataSink());
-            inspectEntryRequest.done();
         } catch (ZipFormatException e) {
             throw new ApkFormatException("Malformed ZIP entry: " + localFileRecord.getName(), e);
         }
+        inspectEntryRequest.done();
     }
 
-    /* access modifiers changed from: private */
-    public static class OutputSizeAndDataOffset {
-        public long dataOffsetBytes;
+    private static class OutputSizeAndDataOffset {
         public long outputBytes;
+        public long dataOffsetBytes;
 
-        public OutputSizeAndDataOffset(long outputBytes2, long dataOffsetBytes2) {
-            this.outputBytes = outputBytes2;
-            this.dataOffsetBytes = dataOffsetBytes2;
+        public OutputSizeAndDataOffset(long outputBytes, long dataOffsetBytes) {
+            this.outputBytes = outputBytes;
+            this.dataOffsetBytes = dataOffsetBytes;
         }
     }
 
-    private static OutputSizeAndDataOffset outputInputJarEntryLfhRecordPreservingDataAlignment(DataSource inputLfhSection, LocalFileRecord inputRecord, DataSink outputLfhSection, long outputOffset) throws IOException {
+    private static OutputSizeAndDataOffset outputInputJarEntryLfhRecordPreservingDataAlignment(
+            DataSource inputLfhSection,
+            LocalFileRecord inputRecord,
+            DataSink outputLfhSection,
+            long outputOffset)
+            throws IOException {
         long inputOffset = inputRecord.getStartOffsetInArchive();
         if (inputOffset == outputOffset) {
-            return new OutputSizeAndDataOffset(inputRecord.outputRecord(inputLfhSection, outputLfhSection), (long) inputRecord.getDataStartOffsetInRecord());
+            // This record's data will be aligned same as in the input APK.
+            return new OutputSizeAndDataOffset(
+                    inputRecord.outputRecord(inputLfhSection, outputLfhSection),
+                    inputRecord.getDataStartOffsetInRecord());
         }
         int dataAlignmentMultiple = getInputJarEntryDataAlignmentMultiple(inputRecord);
-        if (dataAlignmentMultiple <= 1 || inputOffset % ((long) dataAlignmentMultiple) == outputOffset % ((long) dataAlignmentMultiple)) {
-            return new OutputSizeAndDataOffset(inputRecord.outputRecord(inputLfhSection, outputLfhSection), (long) inputRecord.getDataStartOffsetInRecord());
+        if ((dataAlignmentMultiple <= 1)
+                || ((inputOffset % dataAlignmentMultiple)
+                == (outputOffset % dataAlignmentMultiple))) {
+            // This record's data will be aligned same as in the input APK.
+            return new OutputSizeAndDataOffset(
+                    inputRecord.outputRecord(inputLfhSection, outputLfhSection),
+                    inputRecord.getDataStartOffsetInRecord());
         }
-        if ((inputOffset + ((long) inputRecord.getDataStartOffsetInRecord())) % ((long) dataAlignmentMultiple) != 0) {
-            return new OutputSizeAndDataOffset(inputRecord.outputRecord(inputLfhSection, outputLfhSection), (long) inputRecord.getDataStartOffsetInRecord());
+
+        long inputDataStartOffset = inputOffset + inputRecord.getDataStartOffsetInRecord();
+        if ((inputDataStartOffset % dataAlignmentMultiple) != 0) {
+            // This record's data is not aligned in the input APK. No need to align it in the
+            // output.
+            return new OutputSizeAndDataOffset(
+                    inputRecord.outputRecord(inputLfhSection, outputLfhSection),
+                    inputRecord.getDataStartOffsetInRecord());
         }
-        ByteBuffer aligningExtra = createExtraFieldToAlignData(inputRecord.getExtra(), ((long) inputRecord.getExtraFieldStartOffsetInsideRecord()) + outputOffset, dataAlignmentMultiple);
-        return new OutputSizeAndDataOffset(inputRecord.outputRecordWithModifiedExtra(inputLfhSection, aligningExtra, outputLfhSection), (((long) inputRecord.getDataStartOffsetInRecord()) + ((long) aligningExtra.remaining())) - ((long) inputRecord.getExtra().remaining()));
+
+        // This record's data needs to be re-aligned in the output. This is achieved using the
+        // record's extra field.
+        ByteBuffer aligningExtra =
+                createExtraFieldToAlignData(
+                        inputRecord.getExtra(),
+                        outputOffset + inputRecord.getExtraFieldStartOffsetInsideRecord(),
+                        dataAlignmentMultiple);
+        long dataOffset =
+                (long) inputRecord.getDataStartOffsetInRecord()
+                        + aligningExtra.remaining()
+                        - inputRecord.getExtra().remaining();
+        return new OutputSizeAndDataOffset(
+                inputRecord.outputRecordWithModifiedExtra(
+                        inputLfhSection, aligningExtra, outputLfhSection),
+                dataOffset);
     }
 
     private static int getInputJarEntryDataAlignmentMultiple(LocalFileRecord entry) {
         if (entry.isDataCompressed()) {
+            // Compressed entries don't need to be aligned
             return 1;
         }
+
+        // Attempt to obtain the alignment multiple from the entry's extra field.
         ByteBuffer extra = entry.getExtra();
         if (extra.hasRemaining()) {
             extra.order(ByteOrder.LITTLE_ENDIAN);
-            while (true) {
-                if (extra.remaining() < 4) {
-                    break;
-                }
+            // FORMAT: sequence of fields. Each field consists of:
+            //   * uint16 ID
+            //   * uint16 size
+            //   * 'size' bytes: payload
+            while (extra.remaining() >= 4) {
                 short headerId = extra.getShort();
                 int dataSize = ZipUtils.getUnsignedInt16(extra);
                 if (dataSize > extra.remaining()) {
+                    // Malformed field -- insufficient input remaining
                     break;
-                } else if (headerId != -9931) {
-                    extra.position(extra.position() + dataSize);
-                } else if (dataSize >= 2) {
-                    return ZipUtils.getUnsignedInt16(extra);
                 }
+                if (headerId != ALIGNMENT_ZIP_EXTRA_DATA_FIELD_HEADER_ID) {
+                    // Skip this field
+                    extra.position(extra.position() + dataSize);
+                    continue;
+                }
+                // This is APK alignment field.
+                // FORMAT:
+                //  * uint16 alignment multiple (in bytes)
+                //  * remaining bytes -- padding to achieve alignment of data which starts after
+                //    the extra field
+                if (dataSize < 2) {
+                    // Malformed
+                    break;
+                }
+                return ZipUtils.getUnsignedInt16(extra);
             }
         }
-        if (entry.getName().endsWith(".so")) {
-            return ApkSigningBlockUtils.ANDROID_COMMON_PAGE_ALIGNMENT_BYTES;
-        }
-        return 4;
+
+        // Fall back to filename-based defaults
+        return (entry.getName().endsWith(".so")) ? ANDROID_COMMON_PAGE_ALIGNMENT_BYTES : 4;
     }
 
-    private static ByteBuffer createExtraFieldToAlignData(ByteBuffer original, long extraStartOffset, int dataAlignmentMultiple) {
+    private static ByteBuffer createExtraFieldToAlignData(
+            ByteBuffer original, long extraStartOffset, int dataAlignmentMultiple) {
         if (dataAlignmentMultiple <= 1) {
             return original;
         }
+
+        // In the worst case scenario, we'll increase the output size by 6 + dataAlignment - 1.
         ByteBuffer result = ByteBuffer.allocate(original.remaining() + 5 + dataAlignmentMultiple);
         result.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Step 1. Output all extra fields other than the one which is to do with alignment
+        // FORMAT: sequence of fields. Each field consists of:
+        //   * uint16 ID
+        //   * uint16 size
+        //   * 'size' bytes: payload
         while (original.remaining() >= 4) {
             short headerId = original.getShort();
             int dataSize = ZipUtils.getUnsignedInt16(original);
             if (dataSize > original.remaining()) {
+                // Malformed field -- insufficient input remaining
                 break;
-            } else if ((headerId == 0 && dataSize == 0) || headerId == -9931) {
-                original.position(original.position() + dataSize);
-            } else {
-                original.position(original.position() - 4);
-                int originalLimit = original.limit();
-                original.limit(original.position() + 4 + dataSize);
-                result.put(original);
-                original.limit(originalLimit);
             }
+            if (((headerId == 0) && (dataSize == 0))
+                    || (headerId == ALIGNMENT_ZIP_EXTRA_DATA_FIELD_HEADER_ID)) {
+                // Ignore the field if it has to do with the old APK data alignment method (filling
+                // the extra field with 0x00 bytes) or the new APK data alignment method.
+                original.position(original.position() + dataSize);
+                continue;
+            }
+            // Copy this field (including header) to the output
+            original.position(original.position() - 4);
+            int originalLimit = original.limit();
+            original.limit(original.position() + 4 + dataSize);
+            result.put(original);
+            original.limit(originalLimit);
         }
-        int paddingSizeBytes = (dataAlignmentMultiple - ((int) (((((long) result.position()) + extraStartOffset) + 6) % ((long) dataAlignmentMultiple)))) % dataAlignmentMultiple;
+
+        // Step 2. Add alignment field
+        // FORMAT:
+        //  * uint16 extra header ID
+        //  * uint16 extra data size
+        //        Payload ('data size' bytes)
+        //      * uint16 alignment multiple (in bytes)
+        //      * remaining bytes -- padding to achieve alignment of data which starts after the
+        //        extra field
+        long dataMinStartOffset =
+                extraStartOffset
+                        + result.position()
+                        + ALIGNMENT_ZIP_EXTRA_DATA_FIELD_MIN_SIZE_BYTES;
+        int paddingSizeBytes =
+                (dataAlignmentMultiple - ((int) (dataMinStartOffset % dataAlignmentMultiple)))
+                        % dataAlignmentMultiple;
         result.putShort(ALIGNMENT_ZIP_EXTRA_DATA_FIELD_HEADER_ID);
-        ZipUtils.putUnsignedInt16(result, paddingSizeBytes + 2);
+        ZipUtils.putUnsignedInt16(result, 2 + paddingSizeBytes);
         ZipUtils.putUnsignedInt16(result, dataAlignmentMultiple);
         result.position(result.position() + paddingSizeBytes);
         result.flip();
+
         return result;
     }
 
-    private static ByteBuffer getZipCentralDirectory(DataSource apk, ApkUtils.ZipSections apkSections) throws IOException, ApkFormatException {
+    private static ByteBuffer getZipCentralDirectory(
+            DataSource apk, ApkUtils.ZipSections apkSections)
+            throws IOException, ApkFormatException {
         long cdSizeBytes = apkSections.getZipCentralDirectorySizeBytes();
-        if (cdSizeBytes > 2147483647L) {
+        if (cdSizeBytes > Integer.MAX_VALUE) {
             throw new ApkFormatException("ZIP Central Directory too large: " + cdSizeBytes);
         }
-        ByteBuffer cd = apk.getByteBuffer(apkSections.getZipCentralDirectoryOffset(), (int) cdSizeBytes);
+        long cdOffset = apkSections.getZipCentralDirectoryOffset();
+        ByteBuffer cd = apk.getByteBuffer(cdOffset, (int) cdSizeBytes);
         cd.order(ByteOrder.LITTLE_ENDIAN);
         return cd;
     }
 
-    private static List<CentralDirectoryRecord> parseZipCentralDirectory(ByteBuffer cd, ApkUtils.ZipSections apkSections) throws ApkFormatException {
+    private static List<CentralDirectoryRecord> parseZipCentralDirectory(
+            ByteBuffer cd, ApkUtils.ZipSections apkSections) throws ApkFormatException {
         long cdOffset = apkSections.getZipCentralDirectoryOffset();
         int expectedCdRecordCount = apkSections.getZipCentralDirectoryRecordCount();
         List<CentralDirectoryRecord> cdRecords = new ArrayList<>(expectedCdRecordCount);
         Set<String> entryNames = new HashSet<>(expectedCdRecordCount);
         for (int i = 0; i < expectedCdRecordCount; i++) {
+            CentralDirectoryRecord cdRecord;
             int offsetInsideCd = cd.position();
             try {
-                CentralDirectoryRecord cdRecord = CentralDirectoryRecord.getRecord(cd);
-                String entryName = cdRecord.getName();
-                if (!entryNames.add(entryName)) {
-                    throw new ApkFormatException("Multiple ZIP entries with the same name: " + entryName);
-                }
-                cdRecords.add(cdRecord);
+                cdRecord = CentralDirectoryRecord.getRecord(cd);
             } catch (ZipFormatException e) {
-                throw new ApkFormatException("Malformed ZIP Central Directory record #" + (i + 1) + " at file offset " + (((long) offsetInsideCd) + cdOffset), e);
+                throw new ApkFormatException(
+                        "Malformed ZIP Central Directory record #"
+                                + (i + 1)
+                                + " at file offset "
+                                + (cdOffset + offsetInsideCd),
+                        e);
             }
+            String entryName = cdRecord.getName();
+            if (!entryNames.add(entryName)) {
+                throw new ApkFormatException(
+                        "Multiple ZIP entries with the same name: " + entryName);
+            }
+            cdRecords.add(cdRecord);
         }
-        if (!cd.hasRemaining()) {
-            return cdRecords;
+        if (cd.hasRemaining()) {
+            throw new ApkFormatException(
+                    "Unused space at the end of ZIP Central Directory: "
+                            + cd.remaining()
+                            + " bytes starting at file offset "
+                            + (cdOffset + cd.position()));
         }
-        throw new ApkFormatException("Unused space at the end of ZIP Central Directory: " + cd.remaining() + " bytes starting at file offset " + (((long) cd.position()) + cdOffset));
+
+        return cdRecords;
     }
 
-    private static CentralDirectoryRecord findCdRecord(List<CentralDirectoryRecord> cdRecords, String name) {
+    private static CentralDirectoryRecord findCdRecord(
+            List<CentralDirectoryRecord> cdRecords, String name) {
         for (CentralDirectoryRecord cdRecord : cdRecords) {
             if (name.equals(cdRecord.getName())) {
                 return cdRecord;
@@ -494,295 +850,593 @@ public class ApkSigner {
         return null;
     }
 
-    static ByteBuffer getAndroidManifestFromApk(List<CentralDirectoryRecord> cdRecords, DataSource lhfSection) throws IOException, ApkFormatException, ZipFormatException {
-        CentralDirectoryRecord androidManifestCdRecord = findCdRecord(cdRecords, "AndroidManifest.xml");
-        if (androidManifestCdRecord != null) {
-            return ByteBuffer.wrap(LocalFileRecord.getUncompressedData(lhfSection, androidManifestCdRecord, lhfSection.size()));
+    /**
+     * Returns the contents of the APK's {@code AndroidManifest.xml} or {@code null} if this entry
+     * is not present in the APK.
+     */
+    static ByteBuffer getAndroidManifestFromApk(
+            List<CentralDirectoryRecord> cdRecords, DataSource lhfSection)
+            throws IOException, ApkFormatException, ZipFormatException {
+        CentralDirectoryRecord androidManifestCdRecord =
+                findCdRecord(cdRecords, ANDROID_MANIFEST_ZIP_ENTRY_NAME);
+        if (androidManifestCdRecord == null) {
+            throw new ApkFormatException("Missing " + ANDROID_MANIFEST_ZIP_ENTRY_NAME);
         }
-        throw new ApkFormatException("Missing AndroidManifest.xml");
+
+        return ByteBuffer.wrap(
+                LocalFileRecord.getUncompressedData(
+                        lhfSection, androidManifestCdRecord, lhfSection.size()));
     }
 
-    private static List<Hints.PatternWithRange> extractPinPatterns(List<CentralDirectoryRecord> cdRecords, DataSource lhfSection) throws IOException, ApkFormatException {
-        CentralDirectoryRecord pinListCdRecord = findCdRecord(cdRecords, Hints.PIN_HINT_ASSET_ZIP_ENTRY_NAME);
-        if (pinListCdRecord == null) {
-            return null;
+    /**
+     * Return list of pin patterns embedded in the pin pattern asset file. If no such file, return
+     * {@code null}.
+     */
+    private static List<Hints.PatternWithRange> extractPinPatterns(
+            List<CentralDirectoryRecord> cdRecords, DataSource lhfSection)
+            throws IOException, ApkFormatException {
+        CentralDirectoryRecord pinListCdRecord =
+                findCdRecord(cdRecords, Hints.PIN_HINT_ASSET_ZIP_ENTRY_NAME);
+        List<Hints.PatternWithRange> pinPatterns = null;
+        if (pinListCdRecord != null) {
+            pinPatterns = new ArrayList<>();
+            byte[] patternBlob;
+            try {
+                patternBlob =
+                        LocalFileRecord.getUncompressedData(
+                                lhfSection, pinListCdRecord, lhfSection.size());
+            } catch (ZipFormatException ex) {
+                throw new ApkFormatException("Bad " + pinListCdRecord);
+            }
+            pinPatterns = Hints.parsePinPatterns(patternBlob);
         }
-        new ArrayList<>();
+        return pinPatterns;
+    }
+
+    /**
+     * Returns the minimum Android version (API Level) supported by the provided APK. This is based
+     * on the {@code android:minSdkVersion} attributes of the APK's {@code AndroidManifest.xml}.
+     */
+    private static int getMinSdkVersionFromApk(
+            List<CentralDirectoryRecord> cdRecords, DataSource lhfSection)
+            throws IOException, MinSdkVersionException {
+        ByteBuffer androidManifest;
         try {
-            return Hints.parsePinPatterns(LocalFileRecord.getUncompressedData(lhfSection, pinListCdRecord, lhfSection.size()));
-        } catch (ZipFormatException e) {
-            throw new ApkFormatException("Bad " + pinListCdRecord);
+            androidManifest = getAndroidManifestFromApk(cdRecords, lhfSection);
+        } catch (ZipFormatException | ApkFormatException e) {
+            throw new MinSdkVersionException(
+                    "Failed to determine APK's minimum supported Android platform version", e);
         }
+        return ApkUtils.getMinSdkVersionFromBinaryAndroidManifest(androidManifest);
     }
 
-    private static int getMinSdkVersionFromApk(List<CentralDirectoryRecord> cdRecords, DataSource lhfSection) throws IOException, MinSdkVersionException {
-        try {
-            return ApkUtils.getMinSdkVersionFromBinaryAndroidManifest(getAndroidManifestFromApk(cdRecords, lhfSection));
-        } catch (ApkFormatException | ZipFormatException e) {
-            throw new MinSdkVersionException("Failed to determine APK's minimum supported Android platform version", e);
-        }
-    }
-
+    /**
+     * Configuration of a signer.
+     *
+     * <p>Use {@link Builder} to obtain configuration instances.
+     */
     public static class SignerConfig {
-        private final List<X509Certificate> mCertificates;
         private final String mName;
         private final PrivateKey mPrivateKey;
+        private final List<X509Certificate> mCertificates;
 
-        private SignerConfig(String name, PrivateKey privateKey, List<X509Certificate> certificates) {
-            this.mName = name;
-            this.mPrivateKey = privateKey;
-            this.mCertificates = Collections.unmodifiableList(new ArrayList(certificates));
+        private SignerConfig(
+                String name, PrivateKey privateKey, List<X509Certificate> certificates) {
+            mName = name;
+            mPrivateKey = privateKey;
+            mCertificates = Collections.unmodifiableList(new ArrayList<>(certificates));
         }
 
+        /**
+         * Returns the name of this signer.
+         */
         public String getName() {
-            return this.mName;
+            return mName;
         }
 
+        /**
+         * Returns the signing key of this signer.
+         */
         public PrivateKey getPrivateKey() {
-            return this.mPrivateKey;
+            return mPrivateKey;
         }
 
+        /**
+         * Returns the certificate(s) of this signer. The first certificate's public key corresponds
+         * to this signer's private key.
+         */
         public List<X509Certificate> getCertificates() {
-            return this.mCertificates;
+            return mCertificates;
         }
 
+        /**
+         * Builder of {@link SignerConfig} instances.
+         */
         public static class Builder {
-            private final List<X509Certificate> mCertificates;
             private final String mName;
             private final PrivateKey mPrivateKey;
+            private final List<X509Certificate> mCertificates;
 
+            /**
+             * Constructs a new {@code Builder}.
+             *
+             * @param name         signer's name. The name is reflected in the name of files comprising the
+             *                     JAR signature of the APK.
+             * @param privateKey   signing key
+             * @param certificates list of one or more X.509 certificates. The subject public key of
+             *                     the first certificate must correspond to the {@code privateKey}.
+             */
             public Builder(String name, PrivateKey privateKey, List<X509Certificate> certificates) {
                 if (name.isEmpty()) {
                     throw new IllegalArgumentException("Empty name");
                 }
-                this.mName = name;
-                this.mPrivateKey = privateKey;
-                this.mCertificates = new ArrayList(certificates);
+                mName = name;
+                mPrivateKey = privateKey;
+                mCertificates = new ArrayList<>(certificates);
             }
 
+            /**
+             * Returns a new {@code SignerConfig} instance configured based on the configuration of
+             * this builder.
+             */
             public SignerConfig build() {
-                return new SignerConfig(this.mName, this.mPrivateKey, this.mCertificates);
+                return new SignerConfig(mName, mPrivateKey, mCertificates);
             }
         }
     }
 
+    /**
+     * Builder of {@link ApkSigner} instances.
+     *
+     * <p>The builder requires the following information to construct a working {@code ApkSigner}:
+     *
+     * <ul>
+     *   <li>Signer configs or {@link ApkSignerEngine} -- provided in the constructor,
+     *   <li>APK to be signed -- see {@link #setInputApk(File) setInputApk} variants,
+     *   <li>where to store the output signed APK -- see {@link #setOutputApk(File) setOutputApk}
+     *       variants.
+     * </ul>
+     */
     public static class Builder {
-        private String mCreatedBy;
-        private boolean mDebuggableApkPermitted = true;
-        private boolean mForceSourceStampOverwrite = false;
-        private DataSource mInputApkDataSource;
-        private File mInputApkFile;
-        private Integer mMinSdkVersion;
-        private boolean mOtherSignersSignaturesPreserved;
-        private DataSink mOutputApkDataSink;
-        private DataSource mOutputApkDataSource;
-        private File mOutputApkFile;
-        private File mOutputV4File;
         private final List<SignerConfig> mSignerConfigs;
-        private final ApkSignerEngine mSignerEngine;
-        private SigningCertificateLineage mSigningCertificateLineage;
         private SignerConfig mSourceStampSignerConfig;
-        private SigningCertificateLineage mSourceStampSigningCertificateLineage;
         private boolean mV1SigningEnabled = true;
         private boolean mV2SigningEnabled = true;
         private boolean mV3SigningEnabled = true;
+        private boolean mV4SigningEnabled = false;
+        private boolean mV4ErrorReportingEnabled = false;
+        private boolean mDebuggableApkPermitted = true;
+        private boolean mOtherSignersSignaturesPreserved;
+        private String mCreatedBy;
+        private Integer mMinSdkVersion;
+
+        private final ApkSignerEngine mSignerEngine;
+
+        private File mInputApkFile;
+        private DataSource mInputApkDataSource;
+
+        private File mOutputApkFile;
+        private DataSink mOutputApkDataSink;
+        private DataSource mOutputApkDataSource;
+
+        private File mOutputV4File;
+
+        private SigningCertificateLineage mSigningCertificateLineage;
+
+        // APK Signature Scheme v3 only supports a single signing certificate, so to move to v3
+        // signing by default, but not require prior clients to update to explicitly disable v3
+        // signing for multiple signers, we modify the mV3SigningEnabled depending on the provided
+        // inputs (multiple signers and mSigningCertificateLineage in particular).  Maintain two
+        // extra variables to record whether or not mV3SigningEnabled has been set directly by a
+        // client and so should override the default behavior.
         private boolean mV3SigningExplicitlyDisabled = false;
         private boolean mV3SigningExplicitlyEnabled = false;
-        private boolean mV4ErrorReportingEnabled = false;
-        private boolean mV4SigningEnabled = true;
-        private boolean mVerityEnabled = false;
 
+        /**
+         * Constructs a new {@code Builder} for an {@code ApkSigner} which signs using the provided
+         * signer configurations. The resulting signer may be further customized through this
+         * builder's setters, such as {@link #setMinSdkVersion(int)}, {@link
+         * #setV1SigningEnabled(boolean)}, {@link #setV2SigningEnabled(boolean)}, {@link
+         * #setOtherSignersSignaturesPreserved(boolean)}, {@link #setCreatedBy(String)}.
+         *
+         * <p>{@link #Builder(ApkSignerEngine)} is an alternative for advanced use cases where more
+         * control over low-level details of signing is desired.
+         */
         public Builder(List<SignerConfig> signerConfigs) {
             if (signerConfigs.isEmpty()) {
                 throw new IllegalArgumentException("At least one signer config must be provided");
             }
             if (signerConfigs.size() > 1) {
-                this.mV3SigningEnabled = false;
+                // APK Signature Scheme v3 only supports single signer, unless a
+                // SigningCertificateLineage is provided, in which case this will be reset to true,
+                // since we don't yet have a v4 scheme about which to worry
+                mV3SigningEnabled = false;
             }
-            this.mSignerConfigs = new ArrayList(signerConfigs);
-            this.mSignerEngine = null;
+            mSignerConfigs = new ArrayList<>(signerConfigs);
+            mSignerEngine = null;
         }
 
+        /**
+         * Constructs a new {@code Builder} for an {@code ApkSigner} which signs using the provided
+         * signing engine. This is meant for advanced use cases where more control is needed over
+         * the lower-level details of signing. For typical use cases, {@link #Builder(List)} is more
+         * appropriate.
+         */
         public Builder(ApkSignerEngine signerEngine) {
             if (signerEngine == null) {
                 throw new NullPointerException("signerEngine == null");
             }
-            this.mSignerEngine = signerEngine;
-            this.mSignerConfigs = null;
+            mSignerEngine = signerEngine;
+            mSignerConfigs = null;
         }
 
+        /**
+         * Sets the signing configuration of the source stamp to be embedded in the APK.
+         */
         public Builder setSourceStampSignerConfig(SignerConfig sourceStampSignerConfig) {
-            this.mSourceStampSignerConfig = sourceStampSignerConfig;
+            mSourceStampSignerConfig = sourceStampSignerConfig;
             return this;
         }
 
-        public Builder setSourceStampSigningCertificateLineage(SigningCertificateLineage sourceStampSigningCertificateLineage) {
-            this.mSourceStampSigningCertificateLineage = sourceStampSigningCertificateLineage;
-            return this;
-        }
-
-        public Builder setForceSourceStampOverwrite(boolean force) {
-            this.mForceSourceStampOverwrite = force;
-            return this;
-        }
-
+        /**
+         * Sets the APK to be signed.
+         *
+         * @see #setInputApk(DataSource)
+         */
         public Builder setInputApk(File inputApk) {
             if (inputApk == null) {
                 throw new NullPointerException("inputApk == null");
             }
-            this.mInputApkFile = inputApk;
-            this.mInputApkDataSource = null;
+            mInputApkFile = inputApk;
+            mInputApkDataSource = null;
             return this;
         }
 
+        /**
+         * Sets the APK to be signed.
+         *
+         * @see #setInputApk(File)
+         */
         public Builder setInputApk(DataSource inputApk) {
             if (inputApk == null) {
                 throw new NullPointerException("inputApk == null");
             }
-            this.mInputApkDataSource = inputApk;
-            this.mInputApkFile = null;
+            mInputApkDataSource = inputApk;
+            mInputApkFile = null;
             return this;
         }
 
+        /**
+         * Sets the location of the output (signed) APK. {@code ApkSigner} will create this file if
+         * it doesn't exist.
+         *
+         * @see #setOutputApk(ReadableDataSink)
+         * @see #setOutputApk(DataSink, DataSource)
+         */
         public Builder setOutputApk(File outputApk) {
             if (outputApk == null) {
                 throw new NullPointerException("outputApk == null");
             }
-            this.mOutputApkFile = outputApk;
-            this.mOutputApkDataSink = null;
-            this.mOutputApkDataSource = null;
+            mOutputApkFile = outputApk;
+            mOutputApkDataSink = null;
+            mOutputApkDataSource = null;
             return this;
         }
 
+        /**
+         * Sets the readable data sink which will receive the output (signed) APK. After signing,
+         * the contents of the output APK will be available via the {@link DataSource} interface of
+         * the sink.
+         *
+         * <p>This variant of {@code setOutputApk} is useful for avoiding writing the output APK to
+         * a file. For example, an in-memory data sink, such as {@link
+         * DataSinks#newInMemoryDataSink()}, could be used instead of a file.
+         *
+         * @see #setOutputApk(File)
+         * @see #setOutputApk(DataSink, DataSource)
+         */
         public Builder setOutputApk(ReadableDataSink outputApk) {
-            if (outputApk != null) {
-                return setOutputApk(outputApk, outputApk);
+            if (outputApk == null) {
+                throw new NullPointerException("outputApk == null");
             }
-            throw new NullPointerException("outputApk == null");
+            return setOutputApk(outputApk, outputApk);
         }
 
+        /**
+         * Sets the sink which will receive the output (signed) APK. Data received by the {@code
+         * outputApkOut} sink must be visible through the {@code outputApkIn} data source.
+         *
+         * <p>This is an advanced variant of {@link #setOutputApk(ReadableDataSink)}, enabling the
+         * sink and the source to be different objects.
+         *
+         * @see #setOutputApk(ReadableDataSink)
+         * @see #setOutputApk(File)
+         */
         public Builder setOutputApk(DataSink outputApkOut, DataSource outputApkIn) {
             if (outputApkOut == null) {
                 throw new NullPointerException("outputApkOut == null");
-            } else if (outputApkIn == null) {
-                throw new NullPointerException("outputApkIn == null");
-            } else {
-                this.mOutputApkFile = null;
-                this.mOutputApkDataSink = outputApkOut;
-                this.mOutputApkDataSource = outputApkIn;
-                return this;
             }
+            if (outputApkIn == null) {
+                throw new NullPointerException("outputApkIn == null");
+            }
+            mOutputApkFile = null;
+            mOutputApkDataSink = outputApkOut;
+            mOutputApkDataSource = outputApkIn;
+            return this;
         }
 
+        /**
+         * Sets the location of the V4 output file. {@code ApkSigner} will create this file if it
+         * doesn't exist.
+         */
         public Builder setV4SignatureOutputFile(File v4SignatureOutputFile) {
             if (v4SignatureOutputFile == null) {
                 throw new NullPointerException("v4HashRootOutputFile == null");
             }
-            this.mOutputV4File = v4SignatureOutputFile;
+            mOutputV4File = v4SignatureOutputFile;
             return this;
         }
 
+        /**
+         * Sets the minimum Android platform version (API Level) on which APK signatures produced by
+         * the signer being built must verify. This method is useful for overriding the default
+         * behavior where the minimum API Level is obtained from the {@code android:minSdkVersion}
+         * attribute of the APK's {@code AndroidManifest.xml}.
+         *
+         * <p><em>Note:</em> This method may result in APK signatures which don't verify on some
+         * Android platform versions supported by the APK.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         */
         public Builder setMinSdkVersion(int minSdkVersion) {
             checkInitializedWithoutEngine();
-            this.mMinSdkVersion = Integer.valueOf(minSdkVersion);
+            mMinSdkVersion = minSdkVersion;
             return this;
         }
 
+        /**
+         * Sets whether the APK should be signed using JAR signing (aka v1 signature scheme).
+         *
+         * <p>By default, whether APK is signed using JAR signing is determined by {@code
+         * ApkSigner}, based on the platform versions supported by the APK or specified using {@link
+         * #setMinSdkVersion(int)}. Disabling JAR signing will result in APK signatures which don't
+         * verify on Android Marshmallow (Android 6.0, API Level 23) and lower.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * @param enabled {@code true} to require the APK to be signed using JAR signing, {@code
+         *                false} to require the APK to not be signed using JAR signing.
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         * @see <a
+         * href="https://docs.oracle.com/javase/8/docs/technotes/guides/jar/jar.html#Signed_JAR_File">JAR
+         * signing</a>
+         */
         public Builder setV1SigningEnabled(boolean enabled) {
             checkInitializedWithoutEngine();
-            this.mV1SigningEnabled = enabled;
+            mV1SigningEnabled = enabled;
             return this;
         }
 
+        /**
+         * Sets whether the APK should be signed using APK Signature Scheme v2 (aka v2 signature
+         * scheme).
+         *
+         * <p>By default, whether APK is signed using APK Signature Scheme v2 is determined by
+         * {@code ApkSigner} based on the platform versions supported by the APK or specified using
+         * {@link #setMinSdkVersion(int)}.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * @param enabled {@code true} to require the APK to be signed using APK Signature Scheme
+         *                v2, {@code false} to require the APK to not be signed using APK Signature Scheme v2.
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         * @see <a href="https://source.android.com/security/apksigning/v2.html">APK Signature
+         * Scheme v2</a>
+         */
         public Builder setV2SigningEnabled(boolean enabled) {
             checkInitializedWithoutEngine();
-            this.mV2SigningEnabled = enabled;
+            mV2SigningEnabled = enabled;
             return this;
         }
 
+        /**
+         * Sets whether the APK should be signed using APK Signature Scheme v3 (aka v3 signature
+         * scheme).
+         *
+         * <p>By default, whether APK is signed using APK Signature Scheme v3 is determined by
+         * {@code ApkSigner} based on the platform versions supported by the APK or specified using
+         * {@link #setMinSdkVersion(int)}.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * <p><em>Note:</em> APK Signature Scheme v3 only supports a single signing certificate, but
+         * may take multiple signers mapping to different targeted platform versions.
+         *
+         * @param enabled {@code true} to require the APK to be signed using APK Signature Scheme
+         *                v3, {@code false} to require the APK to not be signed using APK Signature Scheme v3.
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         */
         public Builder setV3SigningEnabled(boolean enabled) {
             checkInitializedWithoutEngine();
-            this.mV3SigningEnabled = enabled;
+            mV3SigningEnabled = enabled;
             if (enabled) {
-                this.mV3SigningExplicitlyEnabled = true;
+                mV3SigningExplicitlyEnabled = true;
             } else {
-                this.mV3SigningExplicitlyDisabled = true;
+                mV3SigningExplicitlyDisabled = true;
             }
             return this;
         }
 
+        /**
+         * Sets whether the APK should be signed using APK Signature Scheme v4.
+         *
+         * <p>V4 signing requires that the APK be v2 or v3 signed.
+         *
+         * @param enabled {@code true} to require the APK to be signed using APK Signature Scheme v2
+         *                or v3 and generate an v4 signature file
+         */
         public Builder setV4SigningEnabled(boolean enabled) {
             checkInitializedWithoutEngine();
-            this.mV4SigningEnabled = enabled;
-            this.mV4ErrorReportingEnabled = enabled;
+            mV4SigningEnabled = enabled;
+            mV4ErrorReportingEnabled = enabled;
             return this;
         }
 
+        /**
+         * Sets whether errors during v4 signing should be reported and halt the signing process.
+         *
+         * <p>Error reporting for v4 signing is disabled by default, but will be enabled if the
+         * caller invokes {@link #setV4SigningEnabled} with a value of true. This method is useful
+         * for tools that enable v4 signing by default but don't want to fail the signing process if
+         * the user did not explicitly request the v4 signing.
+         *
+         * @param enabled {@code false} to prevent errors encountered during the V4 signing from
+         *                halting the signing process
+         */
         public Builder setV4ErrorReportingEnabled(boolean enabled) {
             checkInitializedWithoutEngine();
-            this.mV4ErrorReportingEnabled = enabled;
+            mV4ErrorReportingEnabled = enabled;
             return this;
         }
 
-        public Builder setVerityEnabled(boolean enabled) {
-            checkInitializedWithoutEngine();
-            this.mVerityEnabled = enabled;
-            return this;
-        }
-
+        /**
+         * Sets whether the APK should be signed even if it is marked as debuggable ({@code
+         * android:debuggable="true"} in its {@code AndroidManifest.xml}). For backward
+         * compatibility reasons, the default value of this setting is {@code true}.
+         *
+         * <p>It is dangerous to sign debuggable APKs with production/release keys because Android
+         * platform loosens security checks for such APKs. For example, arbitrary unauthorized code
+         * may be executed in the context of such an app by anybody with ADB shell access.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         */
         public Builder setDebuggableApkPermitted(boolean permitted) {
             checkInitializedWithoutEngine();
-            this.mDebuggableApkPermitted = permitted;
+            mDebuggableApkPermitted = permitted;
             return this;
         }
 
+        /**
+         * Sets whether signatures produced by signers other than the ones configured in this engine
+         * should be copied from the input APK to the output APK.
+         *
+         * <p>By default, signatures of other signers are omitted from the output APK.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         */
         public Builder setOtherSignersSignaturesPreserved(boolean preserved) {
             checkInitializedWithoutEngine();
-            this.mOtherSignersSignaturesPreserved = preserved;
+            mOtherSignersSignaturesPreserved = preserved;
             return this;
         }
 
+        /**
+         * Sets the value of the {@code Created-By} field in JAR signature files.
+         *
+         * <p><em>Note:</em> This method may only be invoked when this builder is not initialized
+         * with an {@link ApkSignerEngine}.
+         *
+         * @throws IllegalStateException if this builder was initialized with an {@link
+         *                               ApkSignerEngine}
+         */
         public Builder setCreatedBy(String createdBy) {
             checkInitializedWithoutEngine();
             if (createdBy == null) {
                 throw new NullPointerException();
             }
-            this.mCreatedBy = createdBy;
+            mCreatedBy = createdBy;
             return this;
         }
 
         private void checkInitializedWithoutEngine() {
-            if (this.mSignerEngine != null) {
-                throw new IllegalStateException("Operation is not available when builder initialized with an engine");
+            if (mSignerEngine != null) {
+                throw new IllegalStateException(
+                        "Operation is not available when builder initialized with an engine");
             }
         }
 
-        public Builder setSigningCertificateLineage(SigningCertificateLineage signingCertificateLineage) {
+        /**
+         * Sets the {@link SigningCertificateLineage} to use with the v3 signature scheme. This
+         * structure provides proof of signing certificate rotation linking {@link SignerConfig}
+         * objects to previous ones.
+         */
+        public Builder setSigningCertificateLineage(
+                SigningCertificateLineage signingCertificateLineage) {
             if (signingCertificateLineage != null) {
-                this.mV3SigningEnabled = true;
-                this.mSigningCertificateLineage = signingCertificateLineage;
+                mV3SigningEnabled = true;
+                mSigningCertificateLineage = signingCertificateLineage;
             }
             return this;
         }
 
+        /**
+         * Returns a new {@code ApkSigner} instance initialized according to the configuration of
+         * this builder.
+         */
         public ApkSigner build() {
-            if (!this.mV3SigningExplicitlyDisabled || !this.mV3SigningExplicitlyEnabled) {
-                if (this.mV3SigningExplicitlyDisabled) {
-                    this.mV3SigningEnabled = false;
-                }
-                if (this.mV3SigningExplicitlyEnabled) {
-                    this.mV3SigningEnabled = true;
-                }
-                if (this.mV4SigningEnabled && !this.mV2SigningEnabled && !this.mV3SigningEnabled) {
-                    if (!this.mV4ErrorReportingEnabled) {
-                        this.mV4SigningEnabled = false;
-                    } else {
-                        throw new IllegalStateException("APK Signature Scheme v4 signing requires at least v2 or v3 signing to be enabled");
-                    }
-                }
-                return new ApkSigner(this.mSignerConfigs, this.mSourceStampSignerConfig, this.mSourceStampSigningCertificateLineage, this.mForceSourceStampOverwrite, this.mMinSdkVersion, this.mV1SigningEnabled, this.mV2SigningEnabled, this.mV3SigningEnabled, this.mV4SigningEnabled, this.mVerityEnabled, this.mV4ErrorReportingEnabled, this.mDebuggableApkPermitted, this.mOtherSignersSignaturesPreserved, this.mCreatedBy, this.mSignerEngine, this.mInputApkFile, this.mInputApkDataSource, this.mOutputApkFile, this.mOutputApkDataSink, this.mOutputApkDataSource, this.mOutputV4File, this.mSigningCertificateLineage);
+            if (mV3SigningExplicitlyDisabled && mV3SigningExplicitlyEnabled) {
+                throw new IllegalStateException(
+                        "Builder configured to both enable and disable APK "
+                                + "Signature Scheme v3 signing");
             }
-            throw new IllegalStateException("Builder configured to both enable and disable APK Signature Scheme v3 signing");
+
+            if (mV3SigningExplicitlyDisabled) {
+                mV3SigningEnabled = false;
+            }
+
+            if (mV3SigningExplicitlyEnabled) {
+                mV3SigningEnabled = true;
+            }
+
+            // If V4 signing is not explicitly set, and V2/V3 signing is disabled, then V4 signing
+            // must be disabled as well as it is dependent on V2/V3.
+            if (mV4SigningEnabled && !mV2SigningEnabled && !mV3SigningEnabled) {
+                if (!mV4ErrorReportingEnabled) {
+                    mV4SigningEnabled = false;
+                } else {
+                    throw new IllegalStateException(
+                            "APK Signature Scheme v4 signing requires at least "
+                                    + "v2 or v3 signing to be enabled");
+                }
+            }
+
+            // TODO - if v3 signing is enabled, check provided signers and history to see if valid
+
+            return new ApkSigner(
+                    mSignerConfigs,
+                    mSourceStampSignerConfig,
+                    mMinSdkVersion,
+                    mV1SigningEnabled,
+                    mV2SigningEnabled,
+                    mV3SigningEnabled,
+                    mV4SigningEnabled,
+                    mV4ErrorReportingEnabled,
+                    mDebuggableApkPermitted,
+                    mOtherSignersSignaturesPreserved,
+                    mCreatedBy,
+                    mSignerEngine,
+                    mInputApkFile,
+                    mInputApkDataSource,
+                    mOutputApkFile,
+                    mOutputApkDataSink,
+                    mOutputApkDataSource,
+                    mOutputV4File,
+                    mSigningCertificateLineage);
         }
     }
 }

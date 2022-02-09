@@ -1,3 +1,8 @@
+//
+// Source code recreated from a .class file by IntelliJ IDEA
+// (powered by FernFlower decompiler)
+//
+
 package com.android.apksigner;
 
 import java.nio.ByteBuffer;
@@ -10,11 +15,13 @@ class HexEncoding {
 
     public static String encode(byte[] data, int offset, int length) {
         StringBuilder result = new StringBuilder(length * 2);
-        for (int i = 0; i < length; i++) {
+
+        for (int i = 0; i < length; ++i) {
             byte b = data[offset + i];
-            result.append(HEX_DIGITS[(b >>> 4) & 15]);
+            result.append(HEX_DIGITS[b >>> 4 & 15]);
             result.append(HEX_DIGITS[b & 15]);
         }
+
         return result.toString();
     }
 

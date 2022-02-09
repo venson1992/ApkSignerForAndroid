@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2016 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.android.apksig.internal.util;
 
 import java.math.BigInteger;
@@ -18,153 +34,185 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+
 import javax.security.auth.x500.X500Principal;
 
+/**
+ * {@link X509Certificate} which delegates all method invocations to the provided delegate
+ * {@code X509Certificate}.
+ */
 public class DelegatingX509Certificate extends X509Certificate {
-    private static final long serialVersionUID = 1;
+    private static final long serialVersionUID = 1L;
+
     private final X509Certificate mDelegate;
 
     public DelegatingX509Certificate(X509Certificate delegate) {
         this.mDelegate = delegate;
     }
 
-    @Override // java.security.cert.X509Extension
+    @Override
     public Set<String> getCriticalExtensionOIDs() {
-        return this.mDelegate.getCriticalExtensionOIDs();
+        return mDelegate.getCriticalExtensionOIDs();
     }
 
+    @Override
     public byte[] getExtensionValue(String oid) {
-        return this.mDelegate.getExtensionValue(oid);
+        return mDelegate.getExtensionValue(oid);
     }
 
-    @Override // java.security.cert.X509Extension
+    @Override
     public Set<String> getNonCriticalExtensionOIDs() {
-        return this.mDelegate.getNonCriticalExtensionOIDs();
+        return mDelegate.getNonCriticalExtensionOIDs();
     }
 
+    @Override
     public boolean hasUnsupportedCriticalExtension() {
-        return this.mDelegate.hasUnsupportedCriticalExtension();
+        return mDelegate.hasUnsupportedCriticalExtension();
     }
 
-    @Override // java.security.cert.X509Certificate
-    public void checkValidity() throws CertificateExpiredException, CertificateNotYetValidException {
-        this.mDelegate.checkValidity();
+    @Override
+    public void checkValidity()
+            throws CertificateExpiredException, CertificateNotYetValidException {
+        mDelegate.checkValidity();
     }
 
-    @Override // java.security.cert.X509Certificate
-    public void checkValidity(Date date) throws CertificateExpiredException, CertificateNotYetValidException {
-        this.mDelegate.checkValidity(date);
+    @Override
+    public void checkValidity(Date date)
+            throws CertificateExpiredException, CertificateNotYetValidException {
+        mDelegate.checkValidity(date);
     }
 
+    @Override
     public int getVersion() {
-        return this.mDelegate.getVersion();
+        return mDelegate.getVersion();
     }
 
+    @Override
     public BigInteger getSerialNumber() {
-        return this.mDelegate.getSerialNumber();
+        return mDelegate.getSerialNumber();
     }
 
+    @Override
     public Principal getIssuerDN() {
-        return this.mDelegate.getIssuerDN();
+        return mDelegate.getIssuerDN();
     }
 
+    @Override
     public Principal getSubjectDN() {
-        return this.mDelegate.getSubjectDN();
+        return mDelegate.getSubjectDN();
     }
 
+    @Override
     public Date getNotBefore() {
-        return this.mDelegate.getNotBefore();
+        return mDelegate.getNotBefore();
     }
 
+    @Override
     public Date getNotAfter() {
-        return this.mDelegate.getNotAfter();
+        return mDelegate.getNotAfter();
     }
 
-    @Override // java.security.cert.X509Certificate
+    @Override
     public byte[] getTBSCertificate() throws CertificateEncodingException {
-        return this.mDelegate.getTBSCertificate();
+        return mDelegate.getTBSCertificate();
     }
 
+    @Override
     public byte[] getSignature() {
-        return this.mDelegate.getSignature();
+        return mDelegate.getSignature();
     }
 
+    @Override
     public String getSigAlgName() {
-        return this.mDelegate.getSigAlgName();
+        return mDelegate.getSigAlgName();
     }
 
+    @Override
     public String getSigAlgOID() {
-        return this.mDelegate.getSigAlgOID();
+        return mDelegate.getSigAlgOID();
     }
 
+    @Override
     public byte[] getSigAlgParams() {
-        return this.mDelegate.getSigAlgParams();
+        return mDelegate.getSigAlgParams();
     }
 
+    @Override
     public boolean[] getIssuerUniqueID() {
-        return this.mDelegate.getIssuerUniqueID();
+        return mDelegate.getIssuerUniqueID();
     }
 
+    @Override
     public boolean[] getSubjectUniqueID() {
-        return this.mDelegate.getSubjectUniqueID();
+        return mDelegate.getSubjectUniqueID();
     }
 
+    @Override
     public boolean[] getKeyUsage() {
-        return this.mDelegate.getKeyUsage();
+        return mDelegate.getKeyUsage();
     }
 
+    @Override
     public int getBasicConstraints() {
-        return this.mDelegate.getBasicConstraints();
+        return mDelegate.getBasicConstraints();
     }
 
-    @Override // java.security.cert.Certificate
+    @Override
     public byte[] getEncoded() throws CertificateEncodingException {
-        return this.mDelegate.getEncoded();
+        return mDelegate.getEncoded();
     }
 
-    @Override // java.security.cert.Certificate
-    public void verify(PublicKey key) throws CertificateException, NoSuchAlgorithmException, InvalidKeyException, NoSuchProviderException, SignatureException {
-        this.mDelegate.verify(key);
+    @Override
+    public void verify(PublicKey key) throws CertificateException, NoSuchAlgorithmException,
+            InvalidKeyException, NoSuchProviderException, SignatureException {
+        mDelegate.verify(key);
     }
 
-    @Override // java.security.cert.Certificate
-    public void verify(PublicKey key, String sigProvider) throws CertificateException, NoSuchAlgorithmException, InvalidKeyException, NoSuchProviderException, SignatureException {
-        this.mDelegate.verify(key, sigProvider);
+    @Override
+    public void verify(PublicKey key, String sigProvider)
+            throws CertificateException, NoSuchAlgorithmException, InvalidKeyException,
+            NoSuchProviderException, SignatureException {
+        mDelegate.verify(key, sigProvider);
     }
 
+    @Override
     public String toString() {
-        return this.mDelegate.toString();
+        return mDelegate.toString();
     }
 
+    @Override
     public PublicKey getPublicKey() {
-        return this.mDelegate.getPublicKey();
+        return mDelegate.getPublicKey();
     }
 
+    @Override
     public X500Principal getIssuerX500Principal() {
-        return this.mDelegate.getIssuerX500Principal();
+        return mDelegate.getIssuerX500Principal();
     }
 
+    @Override
     public X500Principal getSubjectX500Principal() {
-        return this.mDelegate.getSubjectX500Principal();
+        return mDelegate.getSubjectX500Principal();
     }
 
-    @Override // java.security.cert.X509Certificate
+    @Override
     public List<String> getExtendedKeyUsage() throws CertificateParsingException {
-        return this.mDelegate.getExtendedKeyUsage();
+        return mDelegate.getExtendedKeyUsage();
     }
 
-    @Override // java.security.cert.X509Certificate
+    @Override
     public Collection<List<?>> getSubjectAlternativeNames() throws CertificateParsingException {
-        return this.mDelegate.getSubjectAlternativeNames();
+        return mDelegate.getSubjectAlternativeNames();
     }
 
-    @Override // java.security.cert.X509Certificate
+    @Override
     public Collection<List<?>> getIssuerAlternativeNames() throws CertificateParsingException {
-        return this.mDelegate.getIssuerAlternativeNames();
+        return mDelegate.getIssuerAlternativeNames();
     }
 
-    @Override // java.security.cert.X509Certificate, java.security.cert.Certificate
-    public void verify(PublicKey key, Provider sigProvider) throws CertificateException, NoSuchAlgorithmException, InvalidKeyException, SignatureException {
-        this.mDelegate.verify(key, sigProvider);
+    @Override
+    public void verify(PublicKey key, Provider sigProvider) throws CertificateException,
+            NoSuchAlgorithmException, InvalidKeyException, SignatureException {
+        mDelegate.verify(key, sigProvider);
     }
 }
