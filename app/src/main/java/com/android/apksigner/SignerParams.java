@@ -140,10 +140,16 @@ public class SignerParams {
         return this.signerCapabilitiesBuilder;
     }
 
-    boolean isEmpty() {
+    public boolean isEmpty() {
         return this.name == null && this.keystoreFile == null && this.keystoreKeyAlias == null && this.keystorePasswordSpec == null && this.keyPasswordSpec == null && this.passwordCharset == null && this.keystoreType == null && this.keystoreProviderName == null && this.keystoreProviderClass == null && this.keystoreProviderArg == null && this.keyFile == null && this.certFile == null && this.v1SigFileBasename == null && this.privateKey == null && this.certs == null;
     }
 
+    /**
+     * 获取私钥和证书
+     *
+     * @param passwordRetriever
+     * @throws Exception
+     */
     public void loadPrivateKeyAndCerts(PasswordRetriever passwordRetriever) throws Exception {
         if (this.keystoreFile != null) {
             if (this.keyFile != null) {
@@ -165,6 +171,12 @@ public class SignerParams {
 
     }
 
+    /**
+     * 从keystore获取私钥和证书
+     *
+     * @param passwordRetriever
+     * @throws Exception
+     */
     private void loadPrivateKeyAndCertsFromKeyStore(PasswordRetriever passwordRetriever) throws Exception {
         if (this.keystoreFile == null) {
             throw new ParameterException("KeyStore (--ks) must be specified");
@@ -190,7 +202,6 @@ public class SignerParams {
             } else {
                 ks = KeyStore.getInstance(ksType);
             }
-
             String keyAlias = this.keystorePasswordSpec != null ? this.keystorePasswordSpec : "stdin";
             Charset[] additionalPasswordEncodings = this.passwordCharset != null ? new Charset[]{this.passwordCharset} : new Charset[0];
             List<char[]> keystorePasswords = passwordRetriever.getPasswords(keyAlias, "Keystore password for " + this.name, additionalPasswordEncodings);
@@ -268,6 +279,14 @@ public class SignerParams {
         }
     }
 
+    /**
+     * 加载签名
+     *
+     * @param ks        签名
+     * @param file      签名文件
+     * @param passwords 密码
+     * @throws Exception
+     */
     private static void loadKeyStoreFromFile(KeyStore ks, String file, List<char[]> passwords) throws Exception {
         Exception lastFailure = null;
         Iterator var4 = passwords.iterator();

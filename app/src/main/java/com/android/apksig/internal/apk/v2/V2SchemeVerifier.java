@@ -24,8 +24,8 @@ import com.android.apksig.internal.apk.ContentDigestAlgorithm;
 import com.android.apksig.internal.apk.SignatureAlgorithm;
 import com.android.apksig.internal.apk.SignatureInfo;
 import com.android.apksig.internal.util.ByteBufferUtils;
-import com.android.apksig.internal.util.X509CertificateUtils;
 import com.android.apksig.internal.util.GuaranteedEncodedFormX509Certificate;
+import com.android.apksig.internal.util.X509CertificateUtils;
 import com.android.apksig.util.DataSource;
 import com.android.apksig.util.RunnablesExecutor;
 

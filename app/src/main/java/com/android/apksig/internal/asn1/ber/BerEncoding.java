@@ -16,8 +16,8 @@
 
 package com.android.apksig.internal.asn1.ber;
 
-import com.android.apksig.internal.asn1.Asn1Type;
 import com.android.apksig.internal.asn1.Asn1TagClass;
+import com.android.apksig.internal.asn1.Asn1Type;
 
 /**
  * ASN.1 Basic Encoding Rules (BER) constants and helper methods. See {@code X.690}.

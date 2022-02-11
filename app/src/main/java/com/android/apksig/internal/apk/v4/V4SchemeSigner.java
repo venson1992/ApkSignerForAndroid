@@ -20,7 +20,6 @@ import static com.android.apksig.internal.apk.ApkSigningBlockUtils.encodeCertifi
 import static com.android.apksig.internal.apk.v2.V2SchemeSigner.APK_SIGNATURE_SCHEME_V2_BLOCK_ID;
 import static com.android.apksig.internal.apk.v3.V3SchemeSigner.APK_SIGNATURE_SCHEME_V3_BLOCK_ID;
 
-import com.android.apksig.apk.ApkFormatException;
 import com.android.apksig.apk.ApkUtils;
 import com.android.apksig.internal.apk.ApkSigningBlockUtils;
 import com.android.apksig.internal.apk.ApkSigningBlockUtils.SignerConfig;

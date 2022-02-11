@@ -33,8 +33,6 @@ import java.io.PrintStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.Provider;
@@ -66,7 +64,7 @@ public class ApkSignerTool {
     public ApkSignerTool() {
     }
 
-    public static void main(String[] params) throws Exception {
+    public static void cmd(String[] params) throws Exception {
         if (params.length != 0 && !"--help".equals(params[0]) && !"-h".equals(params[0])) {
             if ("--version".equals(params[0])) {
                 System.out.println("0.9");
@@ -332,19 +330,33 @@ public class ApkSignerTool {
                                 tmpOutputApk = outputApk;
                             }
 
-                            Builder apkSignerBuilder = (new Builder(signerConfigs)).setInputApk(inputApk).setOutputApk(tmpOutputApk).setOtherSignersSignaturesPreserved(false).setV1SigningEnabled(v1SigningEnabled).setV2SigningEnabled(v2SigningEnabled).setV3SigningEnabled(v3SigningEnabled).setV4SigningEnabled(v4SigningEnabled).setForceSourceStampOverwrite(forceSourceStampOverwrite).setVerityEnabled(verityEnabled).setV4ErrorReportingEnabled(v4SigningEnabled && v4SigningFlagFound).setDebuggableApkPermitted(debuggableApkPermitted).setSigningCertificateLineage(lineage);
+                            Builder apkSignerBuilder = (new Builder(signerConfigs))
+                                    .setInputApk(inputApk)
+                                    .setOutputApk(tmpOutputApk)
+                                    .setOtherSignersSignaturesPreserved(false)
+                                    .setV1SigningEnabled(v1SigningEnabled)
+                                    .setV2SigningEnabled(v2SigningEnabled)
+                                    .setV3SigningEnabled(v3SigningEnabled)
+                                    .setV4SigningEnabled(v4SigningEnabled)
+                                    /*.setForceSourceStampOverwrite(forceSourceStampOverwrite)*/
+                                    /*.setVerityEnabled(verityEnabled)*/
+                                    .setV4ErrorReportingEnabled(v4SigningEnabled && v4SigningFlagFound)
+                                    .setDebuggableApkPermitted(debuggableApkPermitted)
+                                    .setSigningCertificateLineage(lineage);
                             if (minSdkVersionSpecified) {
                                 apkSignerBuilder.setMinSdkVersion(minSdkVersion);
                             }
 
-                            if (v4SigningEnabled) {
-                                File outputV4SignatureFile = new File(outputApk.getCanonicalPath() + ".idsig");
-                                Files.deleteIfExists(outputV4SignatureFile.toPath());
-                                apkSignerBuilder.setV4SignatureOutputFile(outputV4SignatureFile);
-                            }
+//                            if (v4SigningEnabled) {
+//                                File outputV4SignatureFile = new File(outputApk.getCanonicalPath() + ".idsig");
+//                                Files.deleteIfExists(outputV4SignatureFile.toPath());
+//                                apkSignerBuilder.setV4SignatureOutputFile(outputV4SignatureFile);
+//                            }
 
                             if (sourceStampSignerConfig != null) {
-                                apkSignerBuilder.setSourceStampSignerConfig(sourceStampSignerConfig).setSourceStampSigningCertificateLineage(sourceStampLineage);
+                                apkSignerBuilder
+                                        .setSourceStampSignerConfig(sourceStampSignerConfig)
+                                /*.setSourceStampSigningCertificateLineage(sourceStampLineage)*/;
                             }
 
                             ApkSigner apkSigner = apkSignerBuilder.build();
@@ -360,9 +372,9 @@ public class ApkSignerTool {
                                 throw new MinSdkVersionException("Failed to determine APK's minimum supported platform version. Use --min-sdk-version to override", var36);
                             }
 
-                            if (!tmpOutputApk.getCanonicalPath().equals(outputApk.getCanonicalPath())) {
-                                Files.move(tmpOutputApk.toPath(), outputApk.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                            }
+//                            if (!tmpOutputApk.getCanonicalPath().equals(outputApk.getCanonicalPath())) {
+//                                Files.move(tmpOutputApk.toPath(), outputApk.toPath(), StandardCopyOption.REPLACE_EXISTING);
+//                            }
 
                             if (verbose) {
                                 System.out.println("Signed");
@@ -528,7 +540,7 @@ public class ApkSignerTool {
 
                                 Result result;
                                 try {
-                                    result = verifySourceStamp ? apkVerifier.verifySourceStamp(sourceCertDigest) : apkVerifier.verify();
+                                    result = /*verifySourceStamp ? apkVerifier.verifySourceStamp(sourceCertDigest) :*/ apkVerifier.verify();
                                 } catch (MinSdkVersionException var27) {
                                     String msg = var27.getMessage();
                                     if (!msg.endsWith(".")) {
@@ -593,7 +605,6 @@ public class ApkSignerTool {
                                 var32 = result.getV1SchemeSigners().iterator();
 
                                 Iterator var25;
-                                IssueWithParams warning;
                                 String signerName;
                                 while (var32.hasNext()) {
                                     V1SchemeSignerInfo signer = (V1SchemeSignerInfo) var32.next();
@@ -1117,12 +1128,12 @@ public class ApkSignerTool {
         }
     }
 
-    private static class ProviderInstallSpec {
+    public static class ProviderInstallSpec {
         String className;
         String constructorParam;
         Integer position;
 
-        private ProviderInstallSpec() {
+        public ProviderInstallSpec() {
         }
 
         private boolean isEmpty() {
