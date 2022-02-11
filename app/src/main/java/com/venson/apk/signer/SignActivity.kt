@@ -14,9 +14,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import com.android.apksigner.copyKeyStoreToFile
-import com.android.apksigner.readKeyStoreFromAsset
-import com.android.apksigner.sign
+import com.android.apksigner.*
 import java.io.File
 
 class SignActivity : AppCompatActivity() {
@@ -26,9 +24,9 @@ class SignActivity : AppCompatActivity() {
         private const val REQUEST_PERMISSION_CODE: Int = 0x0012
     }
 
-//    init {
-//        Security.addProvider(OpenSSLProvider())
-//    }
+    init {
+        addProviders()
+    }
 
     private lateinit var mPasswordEditView: EditText
     private lateinit var mAliasEditView: EditText
@@ -61,14 +59,22 @@ class SignActivity : AppCompatActivity() {
         mSignButton.setOnClickListener {
             clickAction()
         }
+        mVerifyButton.setOnClickListener {
+            verify(getTestApk())
+        }
     }
 
-    private fun clickAction() {
-        mLogView.text = ""
+    private fun getTestApk(): File {
 //        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
         val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
         val srcFile = File(srcFilePath)
         printLog("srcFile=$srcFile")
+        return srcFile
+    }
+
+    private fun clickAction() {
+        mLogView.text = ""
+        val srcFile = getTestApk()
         val signPath = "$filesDir/Android.keystore"
         val inputStream = readKeyStoreFromAsset(this, "Android.keystore")
         val isCopySuccess: Boolean = copyKeyStoreToFile(inputStream, signPath)
