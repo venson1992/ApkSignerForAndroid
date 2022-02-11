@@ -18,15 +18,13 @@ import com.android.apksigner.ApkSignerTool.ProviderInstallSpec
 import com.android.apksigner.ParameterException
 import com.android.apksigner.PasswordRetriever
 import com.android.apksigner.SignerParams
-import org.conscrypt.OpenSSLProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
-import java.security.Security
 
-class MainActivity : AppCompatActivity() {
+class SignActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Signer"
@@ -34,9 +32,9 @@ class MainActivity : AppCompatActivity() {
         const val ZIP_MAGIC = 67324752
     }
 
-    init {
-        Security.addProvider(OpenSSLProvider())
-    }
+//    init {
+//        Security.addProvider(OpenSSLProvider())
+//    }
 
     private val sha256: MessageDigest? = null
     private val sha1: MessageDigest? = null
@@ -46,7 +44,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_sign)
         mButton = findViewById(R.id.signButton)
         ActivityCompat.requestPermissions(
             this,
