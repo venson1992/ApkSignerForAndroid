@@ -106,7 +106,7 @@ class SignActivity : AppCompatActivity() {
         val signAlias = mAliasEditView.text.toString()
         try {
             sign(srcFile, signedApk, signFile, signPassword, signAlias)
-            printLog("signed successful", true)
+            printLog("signed successful! ${signFile.absolutePath}", true)
         } catch (e: Exception) {
             printLog(e, true)
         }
