@@ -6,18 +6,12 @@
 package com.android.apksigner;
 
 import com.android.apksig.SigningCertificateLineage.SignerCapabilities.Builder;
-import com.android.apksig.internal.util.X509CertificateUtils;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.Charset;
-import java.security.InvalidKeyException;
 import java.security.Key;
-import java.security.KeyFactory;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -26,18 +20,9 @@ import java.security.Provider;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
-
-import javax.crypto.EncryptedPrivateKeyInfo;
-import javax.crypto.SecretKey;
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.PBEKeySpec;
 
 public class SignerParams {
     private String name;
@@ -141,34 +126,13 @@ public class SignerParams {
     }
 
     public boolean isEmpty() {
-        return this.name == null && this.keystoreFile == null && this.keystoreKeyAlias == null && this.keystorePasswordSpec == null && this.keyPasswordSpec == null && this.passwordCharset == null && this.keystoreType == null && this.keystoreProviderName == null && this.keystoreProviderClass == null && this.keystoreProviderArg == null && this.keyFile == null && this.certFile == null && this.v1SigFileBasename == null && this.privateKey == null && this.certs == null;
-    }
-
-    /**
-     * 获取私钥和证书
-     *
-     * @param passwordRetriever
-     * @throws Exception
-     */
-    public void loadPrivateKeyAndCerts(PasswordRetriever passwordRetriever) throws Exception {
-        if (this.keystoreFile != null) {
-            if (this.keyFile != null) {
-                throw new ParameterException("--ks and --key may not be specified at the same time");
-            }
-
-            if (this.certFile != null) {
-                throw new ParameterException("--ks and --cert may not be specified at the same time");
-            }
-
-            this.loadPrivateKeyAndCertsFromKeyStore(passwordRetriever);
-        } else {
-            if (this.keyFile == null) {
-                throw new ParameterException("KeyStore (--ks) or private key file (--key) must be specified");
-            }
-
-            this.loadPrivateKeyAndCertsFromFiles(passwordRetriever);
-        }
-
+        return this.name == null && this.keystoreFile == null && this.keystoreKeyAlias == null
+                && this.keystorePasswordSpec == null && this.keyPasswordSpec == null
+                && this.passwordCharset == null && this.keystoreType == null
+                && this.keystoreProviderName == null && this.keystoreProviderClass == null
+                && this.keystoreProviderArg == null && this.keyFile == null
+                && this.certFile == null && this.v1SigFileBasename == null
+                && this.privateKey == null && this.certs == null;
     }
 
     /**
@@ -177,7 +141,7 @@ public class SignerParams {
      * @param passwordRetriever
      * @throws Exception
      */
-    private void loadPrivateKeyAndCertsFromKeyStore(PasswordRetriever passwordRetriever) throws Exception {
+    public void loadPrivateKeyAndCertsFromKeyStore(PasswordRetriever passwordRetriever) throws Exception {
         if (this.keystoreFile == null) {
             throw new ParameterException("KeyStore (--ks) must be specified");
         } else {
@@ -202,63 +166,32 @@ public class SignerParams {
             } else {
                 ks = KeyStore.getInstance(ksType);
             }
-            String keyAlias = this.keystorePasswordSpec != null ? this.keystorePasswordSpec : "stdin";
             Charset[] additionalPasswordEncodings = this.passwordCharset != null ? new Charset[]{this.passwordCharset} : new Charset[0];
-            List<char[]> keystorePasswords = passwordRetriever.getPasswords(keyAlias, "Keystore password for " + this.name, additionalPasswordEncodings);
+            List<char[]> keystorePasswords = passwordRetriever.getPasswords(this.keyPasswordSpec, additionalPasswordEncodings);
             loadKeyStoreFromFile(ks, "NONE".equals(this.keystoreFile) ? null : this.keystoreFile, keystorePasswords);
-            keyAlias = null;
             PrivateKey key = null;
-
+            String keyAlias = this.keystoreKeyAlias;
             try {
-                if (this.keystoreKeyAlias == null) {
-                    Enumeration<String> aliases = ks.aliases();
-                    if (aliases != null) {
-                        while (aliases.hasMoreElements()) {
-                            String entryAlias = (String) aliases.nextElement();
-                            if (ks.isKeyEntry(entryAlias)) {
-                                if (this.keystoreKeyAlias != null) {
-                                    throw new ParameterException(this.keystoreFile + " contains multiple key entries. --ks-key-alias option must be used to specify which entry to use.");
-                                }
-
-                                this.keystoreKeyAlias = entryAlias;
-                            }
-                        }
-                    }
-
-                    if (this.keystoreKeyAlias == null) {
-                        throw new ParameterException(this.keystoreFile + " does not contain key entries");
-                    }
-                }
-
-                keyAlias = this.keystoreKeyAlias;
                 if (!ks.isKeyEntry(keyAlias)) {
                     throw new ParameterException(this.keystoreFile + " entry \"" + keyAlias + "\" does not contain a key");
                 }
-
                 Key entryKey;
-                if (this.keyPasswordSpec != null) {
-                    List<char[]> keyPasswords = passwordRetriever.getPasswords(this.keyPasswordSpec, "Key \"" + keyAlias + "\" password for " + this.name, additionalPasswordEncodings);
-                    entryKey = getKeyStoreKey(ks, keyAlias, keyPasswords);
-                } else {
-                    try {
-                        entryKey = getKeyStoreKey(ks, keyAlias, keystorePasswords);
-                    } catch (UnrecoverableKeyException var13) {
-                        List<char[]> keyPasswords = passwordRetriever.getPasswords("stdin", "Key \"" + keyAlias + "\" password for " + this.name, additionalPasswordEncodings);
-                        entryKey = getKeyStoreKey(ks, keyAlias, keyPasswords);
-                    }
-                }
-
+                List<char[]> keyPasswords = passwordRetriever.getPasswords(this.keyPasswordSpec, additionalPasswordEncodings);
+                entryKey = getKeyStoreKey(ks, keyAlias, keyPasswords);
                 if (entryKey == null) {
-                    throw new ParameterException(this.keystoreFile + " entry \"" + keyAlias + "\" does not contain a key");
+                    throw new ParameterException(
+                            this.keystoreFile + " entry \"" + keyAlias + "\" does not contain a key");
                 }
-
                 if (!(entryKey instanceof PrivateKey)) {
-                    throw new ParameterException(this.keystoreFile + " entry \"" + keyAlias + "\" does not contain a private key. It contains a key of algorithm: " + entryKey.getAlgorithm());
+                    throw new ParameterException(
+                            this.keystoreFile + " entry \"" + keyAlias
+                                    + "\" does not contain a private key. " +
+                                    "It contains a key of algorithm: " + entryKey.getAlgorithm());
                 }
-
                 key = (PrivateKey) entryKey;
             } catch (UnrecoverableKeyException var14) {
-                throw new IOException("Failed to obtain key with alias \"" + keyAlias + "\" from " + this.keystoreFile + ". Wrong password?", var14);
+                throw new IOException("Failed to obtain key with alias \"" + keyAlias
+                        + "\" from " + this.keystoreFile + ". Wrong password?", var14);
             }
 
             this.privateKey = key;
@@ -267,14 +200,14 @@ public class SignerParams {
                 this.certs = new ArrayList(certChain.length);
                 Certificate[] var20 = certChain;
                 int var21 = certChain.length;
-
                 for (int var11 = 0; var11 < var21; ++var11) {
                     Certificate cert = var20[var11];
                     this.certs.add((X509Certificate) cert);
                 }
 
             } else {
-                throw new ParameterException(this.keystoreFile + " entry \"" + keyAlias + "\" does not contain certificates");
+                throw new ParameterException(this.keystoreFile + " entry \""
+                        + keyAlias + "\" does not contain certificates");
             }
         }
     }
@@ -287,7 +220,8 @@ public class SignerParams {
      * @param passwords 密码
      * @throws Exception
      */
-    private static void loadKeyStoreFromFile(KeyStore ks, String file, List<char[]> passwords) throws Exception {
+    private static void loadKeyStoreFromFile(KeyStore ks, String file, List<char[]> passwords)
+            throws Exception {
         Exception lastFailure = null;
         Iterator var4 = passwords.iterator();
 
@@ -328,13 +262,11 @@ public class SignerParams {
         }
     }
 
-    private static Key getKeyStoreKey(KeyStore ks, String keyAlias, List<char[]> passwords) throws UnrecoverableKeyException, NoSuchAlgorithmException, KeyStoreException {
+    private static Key getKeyStoreKey(KeyStore ks, String keyAlias, List<char[]> passwords)
+            throws UnrecoverableKeyException, NoSuchAlgorithmException, KeyStoreException {
         UnrecoverableKeyException lastFailure = null;
-        Iterator var4 = passwords.iterator();
 
-        while (var4.hasNext()) {
-            char[] password = (char[]) var4.next();
-
+        for (char[] password : passwords) {
             try {
                 return ks.getKey(keyAlias, password);
             } catch (UnrecoverableKeyException var7) {
@@ -349,135 +281,4 @@ public class SignerParams {
         }
     }
 
-    private void loadPrivateKeyAndCertsFromFiles(PasswordRetriever passwordRetriever) throws Exception {
-        if (this.keyFile == null) {
-            throw new ParameterException("Private key file (--key) must be specified");
-        } else if (this.certFile == null) {
-            throw new ParameterException("Certificate file (--cert) must be specified");
-        } else {
-            byte[] privateKeyBlob = readFully(new File(this.keyFile));
-
-            PKCS8EncodedKeySpec keySpec;
-            try {
-                EncryptedPrivateKeyInfo encryptedPrivateKeyInfo = new EncryptedPrivateKeyInfo(privateKeyBlob);
-                String passwordSpec = this.keyPasswordSpec != null ? this.keyPasswordSpec : "stdin";
-                Charset[] additionalPasswordEncodings = this.passwordCharset != null ? new Charset[]{this.passwordCharset} : new Charset[0];
-                List<char[]> keyPasswords = passwordRetriever.getPasswords(passwordSpec, "Private key password for " + this.name, additionalPasswordEncodings);
-                keySpec = decryptPkcs8EncodedKey(encryptedPrivateKeyInfo, keyPasswords);
-            } catch (IOException var11) {
-                if (this.keyPasswordSpec != null) {
-                    throw new InvalidKeySpecException("Failed to parse encrypted private key blob " + this.keyFile, var11);
-                }
-
-                keySpec = new PKCS8EncodedKeySpec(privateKeyBlob);
-            }
-
-            try {
-                this.privateKey = loadPkcs8EncodedPrivateKey(keySpec);
-            } catch (InvalidKeySpecException var10) {
-                throw new InvalidKeySpecException("Failed to load PKCS #8 encoded private key from " + this.keyFile, var10);
-            }
-
-            FileInputStream in = new FileInputStream(this.certFile);
-
-            Collection certs;
-            try {
-                certs = X509CertificateUtils.generateCertificates(in);
-            } catch (Throwable var9) {
-                try {
-                    in.close();
-                } catch (Throwable var8) {
-                    var9.addSuppressed(var8);
-                }
-
-                throw var9;
-            }
-
-            in.close();
-            ArrayList certList = new ArrayList(certs.size());
-            Iterator var15 = certs.iterator();
-
-            while (var15.hasNext()) {
-                Certificate cert = (Certificate) var15.next();
-                certList.add((X509Certificate) cert);
-            }
-
-            this.certs = certList;
-        }
-    }
-
-    private static PKCS8EncodedKeySpec decryptPkcs8EncodedKey(EncryptedPrivateKeyInfo encryptedPrivateKeyInfo, List<char[]> passwords) throws NoSuchAlgorithmException, InvalidKeySpecException, InvalidKeyException {
-        SecretKeyFactory keyFactory = SecretKeyFactory.getInstance(encryptedPrivateKeyInfo.getAlgName());
-        InvalidKeySpecException lastKeySpecException = null;
-        InvalidKeyException lastKeyException = null;
-        Iterator var5 = passwords.iterator();
-
-        while (var5.hasNext()) {
-            char[] password = (char[]) var5.next();
-            PBEKeySpec decryptionKeySpec = new PBEKeySpec(password);
-
-            try {
-                SecretKey decryptionKey = keyFactory.generateSecret(decryptionKeySpec);
-                return encryptedPrivateKeyInfo.getKeySpec(decryptionKey);
-            } catch (InvalidKeySpecException var9) {
-                lastKeySpecException = var9;
-            } catch (InvalidKeyException var10) {
-                lastKeyException = var10;
-            }
-        }
-
-        if (lastKeyException == null && lastKeySpecException == null) {
-            throw new RuntimeException("No passwords");
-        } else if (lastKeyException != null) {
-            throw lastKeyException;
-        } else {
-            throw lastKeySpecException;
-        }
-    }
-
-    private static PrivateKey loadPkcs8EncodedPrivateKey(PKCS8EncodedKeySpec spec) throws InvalidKeySpecException, NoSuchAlgorithmException {
-        try {
-            return KeyFactory.getInstance("RSA").generatePrivate(spec);
-        } catch (InvalidKeySpecException var4) {
-            try {
-                return KeyFactory.getInstance("EC").generatePrivate(spec);
-            } catch (InvalidKeySpecException var3) {
-                try {
-                    return KeyFactory.getInstance("DSA").generatePrivate(spec);
-                } catch (InvalidKeySpecException var2) {
-                    throw new InvalidKeySpecException("Not an RSA, EC, or DSA private key");
-                }
-            }
-        }
-    }
-
-    private static byte[] readFully(File file) throws IOException {
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-        FileInputStream in = new FileInputStream(file);
-
-        try {
-            drain(in, result);
-        } catch (Throwable var6) {
-            try {
-                in.close();
-            } catch (Throwable var5) {
-                var6.addSuppressed(var5);
-            }
-
-            throw var6;
-        }
-
-        in.close();
-        return result.toByteArray();
-    }
-
-    private static void drain(InputStream in, OutputStream out) throws IOException {
-        byte[] buf = new byte[65536];
-
-        int chunkSize;
-        while ((chunkSize = in.read(buf)) != -1) {
-            out.write(buf, 0, chunkSize);
-        }
-
-    }
 }

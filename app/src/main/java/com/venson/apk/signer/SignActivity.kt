@@ -9,43 +9,43 @@ import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import com.android.apksig.ApkSigner
-import com.android.apksig.SigningCertificateLineage
-import com.android.apksig.apk.MinSdkVersionException
-import com.android.apksigner.ApkSignerTool.ProviderInstallSpec
-import com.android.apksigner.ParameterException
-import com.android.apksigner.PasswordRetriever
-import com.android.apksigner.SignerParams
+import com.android.apksigner.copyKeyStoreToFile
+import com.android.apksigner.readKeyStoreFromAsset
+import com.android.apksigner.sign
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.security.MessageDigest
 
 class SignActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Signer"
         private const val REQUEST_PERMISSION_CODE: Int = 0x0012
-        const val ZIP_MAGIC = 67324752
     }
 
 //    init {
 //        Security.addProvider(OpenSSLProvider())
 //    }
 
-    private val sha256: MessageDigest? = null
-    private val sha1: MessageDigest? = null
-    private val md5: MessageDigest? = null
-
-    private lateinit var mButton: View
+    private lateinit var mPasswordEditView: EditText
+    private lateinit var mAliasEditView: EditText
+    private lateinit var mSignButton: View
+    private lateinit var mVerifyButton: View
+    private lateinit var mScrollView: View
+    private lateinit var mLogView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_sign)
-        mButton = findViewById(R.id.signButton)
+        mPasswordEditView = findViewById(R.id.passwordEditView)
+        mAliasEditView = findViewById(R.id.aliasEditView)
+        mSignButton = findViewById(R.id.signButton)
+        mVerifyButton = findViewById(R.id.verifyButton)
+        mScrollView = findViewById(R.id.scrollView)
+        mLogView = findViewById(R.id.logView)
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
@@ -58,18 +58,21 @@ class SignActivity : AppCompatActivity() {
                 startActivity(intent)
             }
         }
-        mButton.setOnClickListener {
+        mSignButton.setOnClickListener {
             clickAction()
         }
     }
 
     private fun clickAction() {
-        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
-//        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
+        mLogView.text = ""
+//        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
+        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
         val srcFile = File(srcFilePath)
+        printLog("srcFile=$srcFile")
         val signPath = "$filesDir/Android.keystore"
-        val isCopySuccess: Boolean = copyAssetFile("Android.keystore", signPath)
-        Log.d(TAG, "isCopySuccess=$isCopySuccess;signPath=$signPath")
+        val inputStream = readKeyStoreFromAsset(this, "Android.keystore")
+        val isCopySuccess: Boolean = copyKeyStoreToFile(inputStream, signPath)
+        printLog("isCopySuccess=$isCopySuccess;signPath=$signPath")
         var signFile: File? = null
         try {
             signFile = File(signPath)
@@ -77,7 +80,7 @@ class SignActivity : AppCompatActivity() {
             e.printStackTrace()
         }
         if (signFile == null) {
-            Log.d(TAG, "signFile == null")
+            printLog("signFile == null")
             return
         }
         val signedApkPath: String =
@@ -89,184 +92,59 @@ class SignActivity : AppCompatActivity() {
             null
         }
         if (signedApk == null) {
-            Log.d(TAG, "signedApk == null")
+            printLog("signedApk == null")
             return
         }
         if (!signedApk.exists()) {
             val isCreated = signedApk.createNewFile()
             if (!isCreated) {
-                Log.d(TAG, "signedApk.createNewFile failed")
+                printLog("signedApk.createNewFile failed")
                 return
             }
         }
-        sign(srcFile, signedApk, signFile)
-    }
-
-    /**
-     * 签名
-     * @param inputApk 源apk文件
-     * @param outputApk 目标apk文件
-     * @param signFile 签名文件
-     */
-    fun sign(inputApk: File, outputApk: File, signFile: File) {
-        val verbose = false
-        val v1SigningEnabled = true
-        val v2SigningEnabled = true
-        val v3SigningEnabled = true
-        val v4SigningEnabled = true
-        val forceSourceStampOverwrite = false
-        val verityEnabled = false
-        val debuggableApkPermitted = true
-        val minSdkVersion = 1
-        val minSdkVersionSpecified = false
-        val maxSdkVersion = 2147483647
-        val signers: MutableList<SignerParams> = ArrayList(1)
-        val signerParams = SignerParams()
-        val lineage: SigningCertificateLineage? = null
-        val sourceStampSignerParams = SignerParams()
-        val sourceStampLineage: SigningCertificateLineage? = null
-        val providers: MutableList<ProviderInstallSpec?> = mutableListOf()
-        val providerParams = ProviderInstallSpec()
-        val v4SigningFlagFound = false
-        val sourceStampFlagFound = false
-        /*
-        初始化签名数据
-         */
-        val signPassword = "6445569"
-        val signAlias = "android.keystore"
-        signerParams.setKeystoreFile(signFile.absolutePath)
-        signerParams.keystoreKeyAlias = signAlias
-//        signerParams.setKeystorePasswordSpec(signPassword)
-//        signerParams.setKeyPasswordSpec(signPassword)
-        if (!signerParams.isEmpty) {
-            signers.add(signerParams)
-        }
-        /*
-        签名密码
-         */
-        val sourceStampSignerConfig: ApkSigner.SignerConfig? = null
-        val signerConfigs: MutableList<ApkSigner.SignerConfig> = ArrayList(signers.size)
-        val passwordRetriever = PasswordRetriever()
-        signers.forEachIndexed { index, signer ->
-            signer.name = "signer #${index + 1}"
-            getSignerConfig(signer, passwordRetriever)?.let { signerConfig ->
-                signerConfigs.add(signerConfig)
-                Log.d(TAG, "signerConfig=$signerConfig")
-            }
-        }
+        val signPassword = mPasswordEditView.text.toString()
+        val signAlias = mAliasEditView.text.toString()
         try {
-            passwordRetriever.close()
-        } catch (var34: Throwable) {
-            var34.printStackTrace()
-        }
-        /*
-        签名
-         */
-        val apkSignerBuilder: ApkSigner.Builder = ApkSigner.Builder(signerConfigs)
-            .setInputApk(inputApk)
-            .setOutputApk(outputApk)
-            .setOtherSignersSignaturesPreserved(false)
-            .setV1SigningEnabled(v1SigningEnabled)
-            .setV2SigningEnabled(v2SigningEnabled)
-            .setV3SigningEnabled(v3SigningEnabled)
-            .setV4SigningEnabled(v4SigningEnabled) /*.setForceSourceStampOverwrite(forceSourceStampOverwrite)*/ /*.setVerityEnabled(verityEnabled)*/
-            .setV4ErrorReportingEnabled(v4SigningEnabled && v4SigningFlagFound)
-            .setDebuggableApkPermitted(debuggableApkPermitted)
-            .setSigningCertificateLineage(lineage)
-        val apkSigner = apkSignerBuilder.build()
-        try {
-            apkSigner.sign()
-        } catch (var36: MinSdkVersionException) {
-            var msg = var36.message
-            if (!msg!!.endsWith(".")) {
-                msg = "$msg."
-            }
-            throw MinSdkVersionException(
-                "Failed to determine APK's minimum supported platform version. Use --min-sdk-version to override",
-                var36
-            )
-        }
-        Log.d(TAG, "Signed")
-    }
-
-    /**
-     * 复制asset文件到存储空间
-     */
-    fun copyAssetFile(assetPath: String?, targetPath: String?): Boolean {
-        var `is`: InputStream? = null
-        var os: FileOutputStream? = null
-        val assetManager = assets
-        return try {
-            `is` = assetManager.open(assetPath!!)
-            val outFile = File(targetPath)
-            if (!outFile.exists()) {
-                val isCreated = outFile.createNewFile()
-                if (!isCreated) {
-                    return false
-                }
-            }
-            os = FileOutputStream(outFile)
-            val buffer = ByteArray(1024)
-            var byteCount = 0
-            while (`is`.read(buffer).also { byteCount = it } != -1) {
-                os.write(buffer, 0, byteCount)
-            }
-            os.flush()
-            true
-        } catch (e: IOException) {
-            e.printStackTrace()
-            false
-        } finally {
-            try {
-                `is`?.close()
-                os?.close()
-            } catch (e: IOException) {
-                e.printStackTrace()
-            }
+            sign(srcFile, signedApk, signFile, signPassword, signAlias)
+            printLog("signed successful", true)
+        } catch (e: Exception) {
+            printLog(e, true)
         }
     }
 
-    /**
-     * 获得签名配置
-     */
-    private fun getSignerConfig(
-        signer: SignerParams,
-        passwordRetriever: PasswordRetriever
-    ): ApkSigner.SignerConfig? {
-        try {
-            signer.loadPrivateKeyAndCerts(passwordRetriever)
-        } catch (var5: ParameterException) {
-            Log.d(
-                TAG, "Failed to load signer \"" + signer.name + "\": " + var5.message
-            )
-            return null
-        } catch (var6: java.lang.Exception) {
-            Log.d(
-                TAG, "Failed to load signer \"" + signer.name + "\""
-            )
-            var6.printStackTrace()
-            return null
+    private fun printLog(msg: String, isShowToast: Boolean = false) {
+        val stringBuilder = StringBuilder(mLogView.text)
+        if (stringBuilder.isNotEmpty()) {
+            stringBuilder.append("\n")
         }
-        val v1SigBasename: String = if (signer.v1SigFileBasename != null) {
-            signer.v1SigFileBasename
-        } else if (signer.keystoreKeyAlias != null) {
-            signer.keystoreKeyAlias
-        } else {
-            if (signer.keyFile == null) {
-                throw RuntimeException("Neither KeyStore key alias nor private key file available")
-            }
-            val keyFileName = File(signer.keyFile).name
-            val delimiterIndex = keyFileName.indexOf(46.toChar())
-            if (delimiterIndex == -1) {
-                keyFileName
-            } else {
-                keyFileName.substring(0, delimiterIndex)
-            }
+        stringBuilder.append(msg)
+        mLogView.text = stringBuilder
+        Log.d(TAG, msg)
+        if (isShowToast) {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
         }
-        return ApkSigner.SignerConfig.Builder(
-            v1SigBasename,
-            signer.privateKey,
-            signer.certs
-        ).build()
+        scrollBottom()
     }
+
+    private fun printLog(e: Throwable, isShowToast: Boolean = false) {
+        val stringBuilder = StringBuilder(mLogView.text)
+        if (stringBuilder.isNotEmpty()) {
+            stringBuilder.append("\n")
+        }
+        val msg = e.stackTraceToString()
+        stringBuilder.append(msg)
+        mLogView.text = stringBuilder
+        e.printStackTrace()
+        if (isShowToast) {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+        scrollBottom()
+    }
+
+    private fun scrollBottom() {
+        mScrollView.post {
+            mScrollView.scrollTo(0, mLogView.measuredHeight)
+        }
+    }
+
 }

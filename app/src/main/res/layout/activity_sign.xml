@@ -6,18 +6,36 @@
     android:layout_height="match_parent"
     tools:context=".SignActivity">
 
+    <EditText
+        android:id="@+id/passwordEditView"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:layout_marginHorizontal="15dp"
+        android:layout_marginTop="20dp"
+        android:hint="密码"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <EditText
+        android:id="@+id/aliasEditView"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:layout_marginHorizontal="15dp"
+        android:layout_marginTop="20dp"
+        android:hint="别名"
+        app:layout_constraintTop_toBottomOf="@id/passwordEditView" />
+
     <androidx.appcompat.widget.AppCompatButton
         android:id="@+id/signButton"
         android:layout_width="120dp"
         android:layout_height="50dp"
-        android:layout_marginTop="50dp"
+        android:layout_marginTop="20dp"
         android:gravity="center"
         android:text="签名"
         android:textColor="@color/black"
         android:textSize="20sp"
         app:layout_constraintEnd_toStartOf="@id/verifyButton"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/aliasEditView" />
 
     <androidx.appcompat.widget.AppCompatButton
         android:id="@+id/verifyButton"
@@ -31,14 +49,23 @@
         app:layout_constraintStart_toEndOf="@id/signButton"
         app:layout_constraintTop_toTopOf="@id/signButton" />
 
-    <TextView
-        android:id="@+id/logView"
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/scrollView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginTop="20dp"
-        tools:text="日志"
         android:paddingHorizontal="15dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/signButton" />
+        app:layout_constraintTop_toBottomOf="@id/signButton">
+
+        <TextView
+            android:id="@+id/logView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/black"
+            android:textSize="14sp"
+            tools:text="日志" />
+
+    </androidx.core.widget.NestedScrollView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

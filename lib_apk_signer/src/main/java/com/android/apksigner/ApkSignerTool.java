@@ -16,11 +16,7 @@ import com.android.apksig.ApkVerifier.Result.V1SchemeSignerInfo;
 import com.android.apksig.ApkVerifier.Result.V2SchemeSignerInfo;
 import com.android.apksig.ApkVerifier.Result.V3SchemeSignerInfo;
 import com.android.apksig.SigningCertificateLineage;
-import com.android.apksig.SigningCertificateLineage.SignerCapabilities;
-import com.android.apksig.apk.ApkFormatException;
 import com.android.apksig.apk.MinSdkVersionException;
-import com.android.apksig.util.DataSource;
-import com.android.apksig.util.DataSources;
 import com.android.apksigner.OptionsParser.OptionsException;
 
 import org.conscrypt.OpenSSLProvider;
@@ -30,12 +26,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
-import java.io.RandomAccessFile;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.Provider;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.cert.CertificateEncodingException;
@@ -77,10 +70,6 @@ public class ApkSignerTool {
                         sign((String[]) Arrays.copyOfRange(params, 1, params.length));
                     } else if ("verify".equals(cmd)) {
                         verify((String[]) Arrays.copyOfRange(params, 1, params.length));
-                    } else if ("rotate".equals(cmd)) {
-                        rotate((String[]) Arrays.copyOfRange(params, 1, params.length));
-                    } else if ("lineage".equals(cmd)) {
-                        lineage((String[]) Arrays.copyOfRange(params, 1, params.length));
                     } else if ("help".equals(cmd)) {
                         printUsage("help.txt");
                     } else if ("version".equals(cmd)) {
@@ -117,8 +106,6 @@ public class ApkSignerTool {
             boolean v2SigningEnabled = true;
             boolean v3SigningEnabled = true;
             boolean v4SigningEnabled = true;
-            boolean forceSourceStampOverwrite = false;
-            boolean verityEnabled = false;
             boolean debuggableApkPermitted = true;
             int minSdkVersion = 1;
             boolean minSdkVersionSpecified = false;
@@ -127,9 +114,6 @@ public class ApkSignerTool {
             SignerParams signerParams = new SignerParams();
             SigningCertificateLineage lineage = null;
             SignerParams sourceStampSignerParams = new SignerParams();
-            SigningCertificateLineage sourceStampLineage = null;
-            List<ApkSignerTool.ProviderInstallSpec> providers = new ArrayList();
-            ApkSignerTool.ProviderInstallSpec providerParams = new ApkSignerTool.ProviderInstallSpec();
             OptionsParser optionsParser = new OptionsParser(params);
             String optionOriginalForm = null;
             boolean v4SigningFlagFound = false;
@@ -142,110 +126,28 @@ public class ApkSignerTool {
                     printUsage("help_sign.txt");
                     return;
                 }
-
-                if ("out".equals(optionName)) {
-                    outputApk = new File(optionsParser.getRequiredValue("Output file name"));
-                } else if ("in".equals(optionName)) {
-                    inputApk = new File(optionsParser.getRequiredValue("Input file name"));
-                } else if ("min-sdk-version".equals(optionName)) {
-                    minSdkVersion = optionsParser.getRequiredIntValue("Mininimum API Level");
-                    minSdkVersionSpecified = true;
-                } else if ("max-sdk-version".equals(optionName)) {
-                    maxSdkVersion = optionsParser.getRequiredIntValue("Maximum API Level");
-                } else if ("v1-signing-enabled".equals(optionName)) {
-                    v1SigningEnabled = optionsParser.getOptionalBooleanValue(true);
-                } else if ("v2-signing-enabled".equals(optionName)) {
-                    v2SigningEnabled = optionsParser.getOptionalBooleanValue(true);
-                } else if ("v3-signing-enabled".equals(optionName)) {
-                    v3SigningEnabled = optionsParser.getOptionalBooleanValue(true);
-                } else if ("v4-signing-enabled".equals(optionName)) {
-                    v4SigningEnabled = optionsParser.getOptionalBooleanValue(true);
-                    v4SigningFlagFound = true;
-                } else if ("force-stamp-overwrite".equals(optionName)) {
-                    forceSourceStampOverwrite = optionsParser.getOptionalBooleanValue(true);
-                } else if ("verity-enabled".equals(optionName)) {
-                    verityEnabled = optionsParser.getOptionalBooleanValue(true);
-                } else if ("debuggable-apk-permitted".equals(optionName)) {
-                    debuggableApkPermitted = optionsParser.getOptionalBooleanValue(true);
-                } else if ("next-signer".equals(optionName)) {
-                    if (!signerParams.isEmpty()) {
-                        signers.add(signerParams);
-                        signerParams = new SignerParams();
-                    }
-                } else if ("ks".equals(optionName)) {
-                    signerParams.setKeystoreFile(optionsParser.getRequiredValue("KeyStore file"));
-                } else if ("ks-key-alias".equals(optionName)) {
-                    signerParams.setKeystoreKeyAlias(optionsParser.getRequiredValue("KeyStore key alias"));
-                } else if ("ks-pass".equals(optionName)) {
-                    signerParams.setKeystorePasswordSpec(optionsParser.getRequiredValue("KeyStore password"));
-                } else if ("key-pass".equals(optionName)) {
-                    signerParams.setKeyPasswordSpec(optionsParser.getRequiredValue("Key password"));
-                } else if ("pass-encoding".equals(optionName)) {
-                    String charsetName = optionsParser.getRequiredValue("Password character encoding");
-
-                    try {
-                        signerParams.setPasswordCharset(PasswordRetriever.getCharsetByName(charsetName));
-                    } catch (IllegalArgumentException var35) {
-                        throw new ParameterException("Unsupported password character encoding requested using --pass-encoding: " + charsetName);
-                    }
-                } else if ("v1-signer-name".equals(optionName)) {
-                    signerParams.setV1SigFileBasename(optionsParser.getRequiredValue("JAR signature file basename"));
-                } else if ("ks-type".equals(optionName)) {
-                    signerParams.setKeystoreType(optionsParser.getRequiredValue("KeyStore type"));
-                } else if ("ks-provider-name".equals(optionName)) {
-                    signerParams.setKeystoreProviderName(optionsParser.getRequiredValue("JCA KeyStore Provider name"));
-                } else if ("ks-provider-class".equals(optionName)) {
-                    signerParams.setKeystoreProviderClass(optionsParser.getRequiredValue("JCA KeyStore Provider class name"));
-                } else if ("ks-provider-arg".equals(optionName)) {
-                    signerParams.setKeystoreProviderArg(optionsParser.getRequiredValue("JCA KeyStore Provider constructor argument"));
-                } else if ("key".equals(optionName)) {
-                    signerParams.setKeyFile(optionsParser.getRequiredValue("Private key file"));
-                } else if ("cert".equals(optionName)) {
-                    signerParams.setCertFile(optionsParser.getRequiredValue("Certificate file"));
-                } else {
-                    File stampLineageFile;
-                    if ("lineage".equals(optionName)) {
-                        stampLineageFile = new File(optionsParser.getRequiredValue("Lineage File"));
-                        lineage = getLineageFromInputFile(stampLineageFile);
-                    } else if (!"v".equals(optionName) && !"verbose".equals(optionName)) {
-                        if ("next-provider".equals(optionName)) {
-                            if (!providerParams.isEmpty()) {
-                                providers.add(providerParams);
-                                providerParams = new ApkSignerTool.ProviderInstallSpec();
-                            }
-                        } else if ("provider-class".equals(optionName)) {
-                            providerParams.className = optionsParser.getRequiredValue("JCA Provider class name");
-                        } else if ("provider-arg".equals(optionName)) {
-                            providerParams.constructorParam = optionsParser.getRequiredValue("JCA Provider constructor argument");
-                        } else if ("provider-pos".equals(optionName)) {
-                            providerParams.position = optionsParser.getRequiredIntValue("JCA Provider position");
-                        } else if ("stamp-signer".equals(optionName)) {
-                            sourceStampFlagFound = true;
-                            sourceStampSignerParams = processSignerParams(optionsParser);
-                        } else {
-                            if (!"stamp-lineage".equals(optionName)) {
-                                throw new ParameterException("Unsupported option: " + optionOriginalForm + ". See --help for supported options.");
-                            }
-
-                            stampLineageFile = new File(optionsParser.getRequiredValue("Stamp Lineage File"));
-                            sourceStampLineage = getLineageFromInputFile(stampLineageFile);
-                        }
-                    } else {
+                switch (optionName) {
+                    case "out":
+                        outputApk = new File(optionsParser.getRequiredValue("Output file name"));
+                        break;
+                    case "in":
+                        inputApk = new File(optionsParser.getRequiredValue("Input file name"));
+                        break;
+                    case "ks":
+                        signerParams.setKeystoreFile(optionsParser.getRequiredValue("KeyStore file"));
+                        break;
+                    case "ks-key-alias":
+                        signerParams.setKeystoreKeyAlias(optionsParser.getRequiredValue("KeyStore key alias"));
+                        break;
+                    default:
                         verbose = optionsParser.getOptionalBooleanValue(true);
-                    }
+                        break;
                 }
             }
-
             if (!signerParams.isEmpty()) {
                 signers.add(signerParams);
             }
-
             signerParams = null;
-            if (!providerParams.isEmpty()) {
-                providers.add(providerParams);
-            }
-
-            providerParams = null;
             if (signers.isEmpty()) {
                 throw new ParameterException("At least one signer must be specified");
             } else {
@@ -269,13 +171,6 @@ public class ApkSignerTool {
                 if (minSdkVersionSpecified && minSdkVersion > maxSdkVersion) {
                     throw new ParameterException("Min API Level (" + minSdkVersion + ") > max API Level (" + maxSdkVersion + ")");
                 } else {
-                    Iterator var39 = providers.iterator();
-
-                    while (var39.hasNext()) {
-                        ApkSignerTool.ProviderInstallSpec providerInstallSpec = (ApkSignerTool.ProviderInstallSpec) var39.next();
-                        providerInstallSpec.installProvider();
-                    }
-
                     SignerConfig sourceStampSignerConfig = null;
                     List<SignerConfig> signerConfigs = new ArrayList(signers.size());
                     int signerNumber = 0;
@@ -395,7 +290,7 @@ public class ApkSignerTool {
 
     private static SignerConfig getSignerConfig(SignerParams signer, PasswordRetriever passwordRetriever) {
         try {
-            signer.loadPrivateKeyAndCerts(passwordRetriever);
+            signer.loadPrivateKeyAndCertsFromKeyStore(passwordRetriever);
         } catch (ParameterException var5) {
             System.err.println("Failed to load signer \"" + signer.getName() + "\": " + var5.getMessage());
             System.exit(2);
@@ -702,332 +597,6 @@ public class ApkSignerTool {
         }
     }
 
-    private static void rotate(String[] params) throws Exception {
-        if (params.length == 0) {
-            printUsage("help_rotate.txt");
-        } else {
-            File outputKeyLineage = null;
-            File inputKeyLineage = null;
-            boolean verbose = false;
-            SignerParams oldSignerParams = null;
-            SignerParams newSignerParams = null;
-            int minSdkVersion = 0;
-            List<ApkSignerTool.ProviderInstallSpec> providers = new ArrayList();
-            ApkSignerTool.ProviderInstallSpec providerParams = new ApkSignerTool.ProviderInstallSpec();
-            OptionsParser optionsParser = new OptionsParser(params);
-            String optionOriginalForm = null;
-
-            String optionName;
-            while ((optionName = optionsParser.nextOption()) != null) {
-                optionOriginalForm = optionsParser.getOptionOriginalForm();
-                if ("help".equals(optionName) || "h".equals(optionName)) {
-                    printUsage("help_rotate.txt");
-                    return;
-                }
-
-                if ("out".equals(optionName)) {
-                    outputKeyLineage = new File(optionsParser.getRequiredValue("Output file name"));
-                } else if ("in".equals(optionName)) {
-                    inputKeyLineage = new File(optionsParser.getRequiredValue("Input file name"));
-                } else if ("old-signer".equals(optionName)) {
-                    oldSignerParams = processSignerParams(optionsParser);
-                } else if ("new-signer".equals(optionName)) {
-                    newSignerParams = processSignerParams(optionsParser);
-                } else if ("min-sdk-version".equals(optionName)) {
-                    minSdkVersion = optionsParser.getRequiredIntValue("Mininimum API Level");
-                } else if (!"v".equals(optionName) && !"verbose".equals(optionName)) {
-                    if ("next-provider".equals(optionName)) {
-                        if (!providerParams.isEmpty()) {
-                            providers.add(providerParams);
-                            providerParams = new ApkSignerTool.ProviderInstallSpec();
-                        }
-                    } else if ("provider-class".equals(optionName)) {
-                        providerParams.className = optionsParser.getRequiredValue("JCA Provider class name");
-                    } else if ("provider-arg".equals(optionName)) {
-                        providerParams.constructorParam = optionsParser.getRequiredValue("JCA Provider constructor argument");
-                    } else {
-                        if (!"provider-pos".equals(optionName)) {
-                            throw new ParameterException("Unsupported option: " + optionOriginalForm + ". See --help for supported options.");
-                        }
-
-                        providerParams.position = optionsParser.getRequiredIntValue("JCA Provider position");
-                    }
-                } else {
-                    verbose = optionsParser.getOptionalBooleanValue(true);
-                }
-            }
-
-            if (!providerParams.isEmpty()) {
-                providers.add(providerParams);
-            }
-
-            providerParams = null;
-            if (oldSignerParams.isEmpty()) {
-                throw new ParameterException("Signer parameters for old signer not present");
-            } else if (newSignerParams.isEmpty()) {
-                throw new ParameterException("Signer parameters for new signer not present");
-            } else if (outputKeyLineage == null) {
-                throw new ParameterException("Output lineage file parameter not present");
-            } else {
-                params = optionsParser.getRemainingParams();
-                if (params.length > 0) {
-                    throw new ParameterException("Unexpected parameter(s) after " + optionOriginalForm + ": " + params[0]);
-                } else {
-                    Iterator var12 = providers.iterator();
-
-                    while (var12.hasNext()) {
-                        ApkSignerTool.ProviderInstallSpec providerInstallSpec = (ApkSignerTool.ProviderInstallSpec) var12.next();
-                        providerInstallSpec.installProvider();
-                    }
-
-                    PasswordRetriever passwordRetriever = new PasswordRetriever();
-
-                    try {
-                        oldSignerParams.setName("old signer");
-                        loadPrivateKeyAndCerts(oldSignerParams, passwordRetriever);
-                        com.android.apksig.SigningCertificateLineage.SignerConfig oldSignerConfig = (new com.android.apksig.SigningCertificateLineage.SignerConfig.Builder(oldSignerParams.getPrivateKey(), (X509Certificate) oldSignerParams.getCerts().get(0))).build();
-                        newSignerParams.setName("new signer");
-                        loadPrivateKeyAndCerts(newSignerParams, passwordRetriever);
-                        com.android.apksig.SigningCertificateLineage.SignerConfig newSignerConfig = (new com.android.apksig.SigningCertificateLineage.SignerConfig.Builder(newSignerParams.getPrivateKey(), (X509Certificate) newSignerParams.getCerts().get(0))).build();
-                        SigningCertificateLineage lineage;
-                        if (inputKeyLineage != null) {
-                            lineage = getLineageFromInputFile(inputKeyLineage);
-                            lineage.updateSignerCapabilities(oldSignerConfig, oldSignerParams.getSignerCapabilitiesBuilder().build());
-                            lineage = lineage.spawnDescendant(oldSignerConfig, newSignerConfig, newSignerParams.getSignerCapabilitiesBuilder().build());
-                        } else {
-                            lineage = (new com.android.apksig.SigningCertificateLineage.Builder(oldSignerConfig, newSignerConfig)).setMinSdkVersion(minSdkVersion).setOriginalCapabilities(oldSignerParams.getSignerCapabilitiesBuilder().build()).setNewCapabilities(newSignerParams.getSignerCapabilitiesBuilder().build()).build();
-                        }
-
-                        lineage.writeToFile(outputKeyLineage);
-                    } catch (Throwable var17) {
-                        try {
-                            passwordRetriever.close();
-                        } catch (Throwable var16) {
-                            var17.addSuppressed(var16);
-                        }
-
-                        throw var17;
-                    }
-
-                    passwordRetriever.close();
-                    if (verbose) {
-                        System.out.println("Rotation entry generated.");
-                    }
-
-                }
-            }
-        }
-    }
-
-    public static void lineage(String[] params) throws Exception {
-        if (params.length == 0) {
-            printUsage("help_lineage.txt");
-        } else {
-            boolean verbose = false;
-            boolean printCerts = false;
-            boolean lineageUpdated = false;
-            File inputKeyLineage = null;
-            File outputKeyLineage = null;
-            OptionsParser optionsParser = new OptionsParser(params);
-            ArrayList signers = new ArrayList(1);
-
-            String optionName;
-            while ((optionName = optionsParser.nextOption()) != null) {
-                if ("help".equals(optionName) || "h".equals(optionName)) {
-                    printUsage("help_lineage.txt");
-                    return;
-                }
-
-                if ("in".equals(optionName)) {
-                    inputKeyLineage = new File(optionsParser.getRequiredValue("Input file name"));
-                } else if ("out".equals(optionName)) {
-                    outputKeyLineage = new File(optionsParser.getRequiredValue("Output file name"));
-                } else if ("signer".equals(optionName)) {
-                    SignerParams signerParams = processSignerParams(optionsParser);
-                    signers.add(signerParams);
-                } else if (!"v".equals(optionName) && !"verbose".equals(optionName)) {
-                    if (!"print-certs".equals(optionName)) {
-                        throw new ParameterException("Unsupported option: " + optionsParser.getOptionOriginalForm() + ". See --help for supported options.");
-                    }
-
-                    printCerts = optionsParser.getOptionalBooleanValue(true);
-                } else {
-                    verbose = optionsParser.getOptionalBooleanValue(true);
-                }
-            }
-
-            if (inputKeyLineage == null) {
-                throw new ParameterException("Input lineage file parameter not present");
-            } else {
-                SigningCertificateLineage lineage = getLineageFromInputFile(inputKeyLineage);
-                PasswordRetriever passwordRetriever = new PasswordRetriever();
-
-                int i;
-                try {
-                    for (i = 0; i < signers.size(); ++i) {
-                        SignerParams signerParams = (SignerParams) signers.get(i);
-                        signerParams.setName("signer #" + (i + 1));
-                        loadPrivateKeyAndCerts(signerParams, passwordRetriever);
-                        com.android.apksig.SigningCertificateLineage.SignerConfig signerConfig = (new com.android.apksig.SigningCertificateLineage.SignerConfig.Builder(signerParams.getPrivateKey(), (X509Certificate) signerParams.getCerts().get(0))).build();
-
-                        try {
-                            SignerCapabilities origCapabilities = lineage.getSignerCapabilities(signerConfig);
-                            lineage.updateSignerCapabilities(signerConfig, signerParams.getSignerCapabilitiesBuilder().build());
-                            SignerCapabilities newCapabilities = lineage.getSignerCapabilities(signerConfig);
-                            if (origCapabilities.equals(newCapabilities)) {
-                                if (verbose) {
-                                    System.out.println("The provided signer capabilities for " + signerParams.getName() + " are unchanged.");
-                                }
-                            } else {
-                                lineageUpdated = true;
-                                if (verbose) {
-                                    System.out.println("Updated signer capabilities for " + signerParams.getName() + ".");
-                                }
-                            }
-                        } catch (IllegalArgumentException var17) {
-                            throw new ParameterException("The signer " + signerParams.getName() + " was not found in the specified lineage.");
-                        }
-                    }
-                } catch (Throwable var18) {
-                    try {
-                        passwordRetriever.close();
-                    } catch (Throwable var16) {
-                        var18.addSuppressed(var16);
-                    }
-
-                    throw var18;
-                }
-
-                passwordRetriever.close();
-                if (printCerts) {
-                    List<X509Certificate> signingCerts = lineage.getCertificatesInLineage();
-
-                    for (i = 0; i < signingCerts.size(); ++i) {
-                        X509Certificate signerCert = (X509Certificate) signingCerts.get(i);
-                        SignerCapabilities signerCapabilities = lineage.getSignerCapabilities(signerCert);
-                        printCertificate(signerCert, "Signer #" + (i + 1) + " in lineage", verbose);
-                        printCapabilities(signerCapabilities);
-                    }
-                }
-
-                if (lineageUpdated) {
-                    if (outputKeyLineage == null) {
-                        throw new ParameterException("The lineage was modified but an output file for the lineage was not specified");
-                    }
-
-                    lineage.writeToFile(outputKeyLineage);
-                    if (verbose) {
-                        System.out.println("Updated lineage saved to " + outputKeyLineage + ".");
-                    }
-                }
-
-            }
-        }
-    }
-
-    private static SigningCertificateLineage getLineageFromInputFile(File inputLineageFile) throws ParameterException {
-        try {
-            RandomAccessFile f = new RandomAccessFile(inputLineageFile, "r");
-
-            SigningCertificateLineage var4;
-            label44:
-            {
-                try {
-                    if (f.length() < 4L) {
-                        throw new ParameterException("The input file is not a valid lineage file.");
-                    }
-
-                    DataSource apk = DataSources.asDataSource(f);
-                    int magicValue = apk.getByteBuffer(0L, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
-                    if (magicValue == 1056913873) {
-                        var4 = SigningCertificateLineage.readFromFile(inputLineageFile);
-                        break label44;
-                    }
-
-                    if (magicValue != 67324752) {
-                        throw new ParameterException("The input file is not a valid lineage file.");
-                    }
-
-                    var4 = SigningCertificateLineage.readFromApkFile(inputLineageFile);
-                } catch (Throwable var6) {
-                    try {
-                        f.close();
-                    } catch (Throwable var5) {
-                        var6.addSuppressed(var5);
-                    }
-
-                    throw var6;
-                }
-
-                f.close();
-                return var4;
-            }
-
-            f.close();
-            return var4;
-        } catch (ApkFormatException | IllegalArgumentException | IOException var7) {
-            throw new ParameterException(var7.getMessage());
-        }
-    }
-
-    private static SignerParams processSignerParams(OptionsParser optionsParser) throws OptionsException, ParameterException {
-        SignerParams signerParams = new SignerParams();
-
-        String optionName;
-        while ((optionName = optionsParser.nextOption()) != null) {
-            if ("ks".equals(optionName)) {
-                signerParams.setKeystoreFile(optionsParser.getRequiredValue("KeyStore file"));
-            } else if ("ks-key-alias".equals(optionName)) {
-                signerParams.setKeystoreKeyAlias(optionsParser.getRequiredValue("KeyStore key alias"));
-            } else if ("ks-pass".equals(optionName)) {
-                signerParams.setKeystorePasswordSpec(optionsParser.getRequiredValue("KeyStore password"));
-            } else if ("key-pass".equals(optionName)) {
-                signerParams.setKeyPasswordSpec(optionsParser.getRequiredValue("Key password"));
-            } else if ("pass-encoding".equals(optionName)) {
-                String charsetName = optionsParser.getRequiredValue("Password character encoding");
-
-                try {
-                    signerParams.setPasswordCharset(PasswordRetriever.getCharsetByName(charsetName));
-                } catch (IllegalArgumentException var5) {
-                    throw new ParameterException("Unsupported password character encoding requested using --pass-encoding: " + charsetName);
-                }
-            } else if ("ks-type".equals(optionName)) {
-                signerParams.setKeystoreType(optionsParser.getRequiredValue("KeyStore type"));
-            } else if ("ks-provider-name".equals(optionName)) {
-                signerParams.setKeystoreProviderName(optionsParser.getRequiredValue("JCA KeyStore Provider name"));
-            } else if ("ks-provider-class".equals(optionName)) {
-                signerParams.setKeystoreProviderClass(optionsParser.getRequiredValue("JCA KeyStore Provider class name"));
-            } else if ("ks-provider-arg".equals(optionName)) {
-                signerParams.setKeystoreProviderArg(optionsParser.getRequiredValue("JCA KeyStore Provider constructor argument"));
-            } else if ("key".equals(optionName)) {
-                signerParams.setKeyFile(optionsParser.getRequiredValue("Private key file"));
-            } else if ("cert".equals(optionName)) {
-                signerParams.setCertFile(optionsParser.getRequiredValue("Certificate file"));
-            } else if ("set-installed-data".equals(optionName)) {
-                signerParams.getSignerCapabilitiesBuilder().setInstalledData(optionsParser.getOptionalBooleanValue(true));
-            } else if ("set-shared-uid".equals(optionName)) {
-                signerParams.getSignerCapabilitiesBuilder().setSharedUid(optionsParser.getOptionalBooleanValue(true));
-            } else if ("set-permission".equals(optionName)) {
-                signerParams.getSignerCapabilitiesBuilder().setPermission(optionsParser.getOptionalBooleanValue(true));
-            } else if ("set-rollback".equals(optionName)) {
-                signerParams.getSignerCapabilitiesBuilder().setRollback(optionsParser.getOptionalBooleanValue(true));
-            } else {
-                if (!"set-auth".equals(optionName)) {
-                    optionsParser.putOption();
-                    break;
-                }
-
-                signerParams.getSignerCapabilitiesBuilder().setAuth(optionsParser.getOptionalBooleanValue(true));
-            }
-        }
-
-        if (signerParams.isEmpty()) {
-            throw new ParameterException("Signer specified without arguments");
-        } else {
-            return signerParams;
-        }
-    }
-
     private static void printUsage(String page) {
         try {
             BufferedReader in = new BufferedReader(new InputStreamReader(ApkSignerTool.class.getResourceAsStream(page), StandardCharsets.UTF_8));
@@ -1090,79 +659,6 @@ public class ApkSignerTool {
                 System.out.println(name + " public key MD5 digest: " + HexEncoding.encode(md5.digest(encodedKey)));
             }
 
-        }
-    }
-
-    public static void printCapabilities(SignerCapabilities capabilities) {
-        System.out.println("Has installed data capability: " + capabilities.hasInstalledData());
-        System.out.println("Has shared UID capability    : " + capabilities.hasSharedUid());
-        System.out.println("Has permission capability    : " + capabilities.hasPermission());
-        System.out.println("Has rollback capability      : " + capabilities.hasRollback());
-        System.out.println("Has auth capability          : " + capabilities.hasAuth());
-    }
-
-    private static void loadPrivateKeyAndCerts(SignerParams params, PasswordRetriever passwordRetriever) throws ParameterException {
-        try {
-            params.loadPrivateKeyAndCerts(passwordRetriever);
-            if (params.getKeystoreKeyAlias() != null) {
-                params.setName(params.getKeystoreKeyAlias());
-            } else {
-                if (params.getKeyFile() == null) {
-                    throw new RuntimeException("Neither KeyStore key alias nor private key file available for " + params.getName());
-                }
-
-                String keyFileName = (new File(params.getKeyFile())).getName();
-                int delimiterIndex = keyFileName.indexOf(46);
-                if (delimiterIndex == -1) {
-                    params.setName(keyFileName);
-                } else {
-                    params.setName(keyFileName.substring(0, delimiterIndex));
-                }
-            }
-
-        } catch (ParameterException var4) {
-            throw new ParameterException("Failed to load signer \"" + params.getName() + "\":" + var4.getMessage());
-        } catch (Exception var5) {
-            var5.printStackTrace();
-            throw new ParameterException("Failed to load signer \"" + params.getName() + "\"");
-        }
-    }
-
-    public static class ProviderInstallSpec {
-        String className;
-        String constructorParam;
-        Integer position;
-
-        public ProviderInstallSpec() {
-        }
-
-        private boolean isEmpty() {
-            return this.className == null && this.constructorParam == null && this.position == null;
-        }
-
-        private void installProvider() throws Exception {
-            if (this.className == null) {
-                throw new ParameterException("JCA Provider class name (--provider-class) must be specified");
-            } else {
-                Class<?> providerClass = Class.forName(this.className);
-                if (!Provider.class.isAssignableFrom(providerClass)) {
-                    throw new ParameterException("JCA Provider class " + providerClass + " not subclass of " + Provider.class.getName());
-                } else {
-                    Provider provider;
-                    if (this.constructorParam != null) {
-                        provider = (Provider) providerClass.getConstructor(String.class).newInstance(this.constructorParam);
-                    } else {
-                        provider = (Provider) providerClass.getConstructor().newInstance();
-                    }
-
-                    if (this.position == null) {
-                        Security.addProvider(provider);
-                    } else {
-                        Security.insertProviderAt(provider, this.position);
-                    }
-
-                }
-            }
         }
     }
 }
