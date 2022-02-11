@@ -13,4 +13,5 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ApkSignerForAndroid"
+include ':lib_apk_signer'
 include ':app'
