@@ -70,6 +70,7 @@ class SignActivity : AppCompatActivity() {
 //        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
 //        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
         val srcFilePath = "/storage/sdcard/25game/apps/-823954455.apk"
+//        val srcFilePath = "/storage/emulated/0/25game/apps/1180683424.apk"
         val srcFile = File(srcFilePath)
         printLog("srcFile=$srcFile")
         return srcFile
@@ -124,7 +125,7 @@ class SignActivity : AppCompatActivity() {
     private fun printLog(msg: String, isShowToast: Boolean = false) {
         val stringBuilder = StringBuilder(mLogView.text)
         if (stringBuilder.isNotEmpty()) {
-            stringBuilder.append("\n")
+            stringBuilder.append("\n\n")
         }
         stringBuilder.append(msg)
         mLogView.text = stringBuilder
