@@ -62,18 +62,46 @@ class SignActivity : AppCompatActivity() {
             clickAction()
         }
         mVerifyButton.setOnClickListener {
-            verify(getTestApk())
+            val srcApkFile = getTestApk()
+            verify(srcApkFile)
+            getSignedFile(srcApkFile)?.let {
+                verify(it)
+            } ?: printLog("签名后文件丢失")
         }
     }
 
     private fun getTestApk(): File {
-//        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
-//        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
-        val srcFilePath = "/storage/sdcard/25game/apps/-823954455.apk"
-//        val srcFilePath = "/storage/emulated/0/25game/apps/1180683424.apk"
+        val srcFilePath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            "/storage/emulated/0/25game/apps/-2005212810.apk"
+        } else {
+            "/storage/sdcard/25game/apps/-2005212810.apk"
+        }
         val srcFile = File(srcFilePath)
         printLog("srcFile=$srcFile")
         return srcFile
+    }
+
+    private fun getSignedFile(srcApkFile: File): File? {
+        val signedApkPath: String =
+            srcApkFile.parent + "/" + srcApkFile.nameWithoutExtension + "_signed.apk"
+        val signedApk = try {
+            File(signedApkPath)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+        if (signedApk == null) {
+            printLog("signedApk == null")
+            return null
+        }
+        if (!signedApk.exists()) {
+            val isCreated = signedApk.createNewFile()
+            if (!isCreated) {
+                printLog("signedApk.createNewFile failed")
+                return null
+            }
+        }
+        return signedApk
     }
 
     private fun clickAction() {
@@ -93,28 +121,14 @@ class SignActivity : AppCompatActivity() {
             printLog("signFile == null")
             return
         }
-        val signedApkPath: String =
-            srcFile.parent + "/" + srcFile.nameWithoutExtension + "_signed.apk"
-        val signedApk = try {
-            File(signedApkPath)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-        if (signedApk == null) {
-            printLog("signedApk == null")
-            return
-        }
-        if (!signedApk.exists()) {
-            val isCreated = signedApk.createNewFile()
-            if (!isCreated) {
-                printLog("signedApk.createNewFile failed")
-                return
-            }
-        }
         val signPassword = mPasswordEditView.text.toString()
         val signAlias = mAliasEditView.text.toString()
         try {
+            val signedApk = getSignedFile(srcFile)
+            if (signedApk == null || !signedApk.exists()) {
+                printLog("signedApk 不存在")
+                return
+            }
             sign(srcFile, signedApk, signFile, signPassword, signAlias)
             printLog("signed successful! ${signedApk.absolutePath}", true)
         } catch (e: Exception) {

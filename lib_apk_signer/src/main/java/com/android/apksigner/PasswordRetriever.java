@@ -5,6 +5,10 @@
 
 package com.android.apksigner;
 
+import android.os.Build;
+
+import com.android.apksig.internal.apk.AutoCloseable;
+
 import java.io.Console;
 import java.io.File;
 import java.io.IOException;
@@ -131,7 +135,12 @@ public class PasswordRetriever implements AutoCloseable {
                 Method encodingMethod = Console.class.getDeclaredMethod("encoding");
                 encodingMethod.setAccessible(true);
                 consoleCharsetName = (String) encodingMethod.invoke((Object) null);
-            } catch (ReflectiveOperationException var3) {
+            } catch (Exception var3) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    if (var3 instanceof ReflectiveOperationException) {
+                        return null;
+                    }
+                }
                 return null;
             }
 
@@ -148,7 +157,10 @@ public class PasswordRetriever implements AutoCloseable {
     }
 
     public static Charset getCharsetByName(String charsetName) throws IllegalArgumentException {
-        return "cp65001".equalsIgnoreCase(charsetName) ? StandardCharsets.UTF_8 : Charset.forName(charsetName);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            return "cp65001".equalsIgnoreCase(charsetName) ? StandardCharsets.UTF_8 : Charset.forName(charsetName);
+        }
+        return "cp65001".equalsIgnoreCase(charsetName) ? Charset.forName("UTF-8") : Charset.forName(charsetName);
     }
 
     public void close() {
