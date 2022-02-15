@@ -56,6 +56,8 @@ class SignActivity : AppCompatActivity() {
                 startActivity(intent)
             }
         }
+        mPasswordEditView.setText(BuildConfig.ks_password)
+        mAliasEditView.setText(BuildConfig.ks_alias)
         mSignButton.setOnClickListener {
             clickAction()
         }
@@ -66,7 +68,8 @@ class SignActivity : AppCompatActivity() {
 
     private fun getTestApk(): File {
 //        val srcFilePath = "/storage/emulated/0/25game/apps/-1702942688.apk"
-        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
+//        val srcFilePath = "/storage/emulated/0/25game/apps/-2034501281.apk"
+        val srcFilePath = "/storage/sdcard/25game/apps/-823954455.apk"
         val srcFile = File(srcFilePath)
         printLog("srcFile=$srcFile")
         return srcFile
@@ -112,7 +115,7 @@ class SignActivity : AppCompatActivity() {
         val signAlias = mAliasEditView.text.toString()
         try {
             sign(srcFile, signedApk, signFile, signPassword, signAlias)
-            printLog("signed successful! ${signFile.absolutePath}", true)
+            printLog("signed successful! ${signedApk.absolutePath}", true)
         } catch (e: Exception) {
             printLog(e, true)
         }

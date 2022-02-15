@@ -16,6 +16,8 @@
 
 package com.android.apksig.internal.asn1;
 
+import android.os.Build;
+
 import com.android.apksig.internal.asn1.ber.BerEncoding;
 
 import java.io.ByteArrayOutputStream;
@@ -53,7 +55,12 @@ public final class Asn1DerEncoder {
      */
     public static byte[] encode(Object container) throws Asn1EncodingException {
         Class<?> containerClass = container.getClass();
-        Asn1Class containerAnnotation = containerClass.getDeclaredAnnotation(Asn1Class.class);
+        Asn1Class containerAnnotation;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            containerAnnotation = containerClass.getDeclaredAnnotation(Asn1Class.class);
+        } else {
+            containerAnnotation = containerClass.getAnnotation(Asn1Class.class);
+        }
         if (containerAnnotation == null) {
             throw new Asn1EncodingException(
                     containerClass.getName() + " not annotated with " + Asn1Class.class.getName());
@@ -216,7 +223,12 @@ public final class Asn1DerEncoder {
         Field[] declaredFields = containerClass.getDeclaredFields();
         List<AnnotatedField> result = new ArrayList<>(declaredFields.length);
         for (Field field : declaredFields) {
-            Asn1Field annotation = field.getDeclaredAnnotation(Asn1Field.class);
+            Asn1Field annotation;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                annotation = field.getDeclaredAnnotation(Asn1Field.class);
+            } else {
+                annotation = field.getAnnotation(Asn1Field.class);
+            }
             if (annotation == null) {
                 continue;
             }
@@ -337,7 +349,13 @@ public final class Asn1DerEncoder {
             throws Asn1EncodingException {
         try {
             return field.get(obj);
-        } catch (ReflectiveOperationException e) {
+        } catch (Exception e) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                if (e instanceof ReflectiveOperationException) {
+                    throw new Asn1EncodingException(
+                            "Failed to read " + obj.getClass().getName() + "." + field.getName(), e);
+                }
+            }
             throw new Asn1EncodingException(
                     "Failed to read " + obj.getClass().getName() + "." + field.getName(), e);
         }
@@ -560,8 +578,12 @@ public final class Asn1DerEncoder {
                     }
                     break;
                 case SEQUENCE: {
-                    Asn1Class containerAnnotation =
-                            sourceType.getDeclaredAnnotation(Asn1Class.class);
+                    Asn1Class containerAnnotation;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        containerAnnotation = sourceType.getDeclaredAnnotation(Asn1Class.class);
+                    } else {
+                        containerAnnotation = sourceType.getAnnotation(Asn1Class.class);
+                    }
                     if ((containerAnnotation != null)
                             && (containerAnnotation.type() == Asn1Type.SEQUENCE)) {
                         return toSequence(source);
@@ -569,8 +591,12 @@ public final class Asn1DerEncoder {
                     break;
                 }
                 case CHOICE: {
-                    Asn1Class containerAnnotation =
-                            sourceType.getDeclaredAnnotation(Asn1Class.class);
+                    Asn1Class containerAnnotation;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        containerAnnotation = sourceType.getDeclaredAnnotation(Asn1Class.class);
+                    } else {
+                        containerAnnotation = sourceType.getAnnotation(Asn1Class.class);
+                    }
                     if ((containerAnnotation != null)
                             && (containerAnnotation.type() == Asn1Type.CHOICE)) {
                         return toChoice(source);

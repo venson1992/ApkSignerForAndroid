@@ -16,6 +16,8 @@
 
 package com.android.apksig.internal.asn1;
 
+import android.os.Build;
+
 import com.android.apksig.internal.asn1.ber.BerDataValue;
 import com.android.apksig.internal.asn1.ber.BerDataValueFormatException;
 import com.android.apksig.internal.asn1.ber.BerDataValueReader;
@@ -173,7 +175,15 @@ public final class Asn1BerParser {
         T obj;
         try {
             obj = containerClass.getConstructor().newInstance();
-        } catch (IllegalArgumentException | ReflectiveOperationException e) {
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException) {
+                throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                if (e instanceof ReflectiveOperationException) {
+                    throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
+                }
+            }
             throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
         }
         // Set the matching field's value from the data value
@@ -219,7 +229,14 @@ public final class Asn1BerParser {
         T t;
         try {
             t = containerClass.getConstructor().newInstance();
-        } catch (IllegalArgumentException | ReflectiveOperationException e) {
+        } catch (IllegalArgumentException e) {
+            throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
+        } catch (Exception e) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                if (e instanceof ReflectiveOperationException) {
+                    throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
+                }
+            }
             throw new Asn1DecodingException("Failed to instantiate " + containerClass.getName(), e);
         }
 
@@ -309,7 +326,12 @@ public final class Asn1BerParser {
 
     private static Asn1Type getContainerAsn1Type(Class<?> containerClass)
             throws Asn1DecodingException {
-        Asn1Class containerAnnotation = containerClass.getDeclaredAnnotation(Asn1Class.class);
+        Asn1Class containerAnnotation;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            containerAnnotation = containerClass.getDeclaredAnnotation(Asn1Class.class);
+        } else {
+            containerAnnotation = containerClass.getAnnotation(Asn1Class.class);
+        }
         if (containerAnnotation == null) {
             throw new Asn1DecodingException(
                     containerClass.getName() + " is not annotated with "
@@ -330,7 +352,12 @@ public final class Asn1BerParser {
 
     private static Class<?> getElementType(Field field)
             throws Asn1DecodingException, ClassNotFoundException {
-        String type = field.getGenericType().getTypeName();
+        String type;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            type = field.getGenericType().getTypeName();
+        } else {
+            type = field.getGenericType().toString();
+        }
         int delimiterIndex = type.indexOf('<');
         if (delimiterIndex == -1) {
             throw new Asn1DecodingException("Not a container type: " + field.getGenericType());
@@ -506,7 +533,11 @@ public final class Asn1BerParser {
     private static int integerToInt(ByteBuffer encoded) throws Asn1DecodingException {
         BigInteger value = integerToBigInteger(encoded);
         try {
-            return value.intValueExact();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                return value.intValueExact();
+            } else {
+                return value.intValue();
+            }
         } catch (ArithmeticException e) {
             throw new Asn1DecodingException(
                     String.format("INTEGER cannot be represented as int: %1$d (0x%1$x)", value), e);
@@ -516,7 +547,11 @@ public final class Asn1BerParser {
     private static long integerToLong(ByteBuffer encoded) throws Asn1DecodingException {
         BigInteger value = integerToBigInteger(encoded);
         try {
-            return value.longValueExact();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                return value.longValueExact();
+            } else {
+                return value.longValue();
+            }
         } catch (ArithmeticException e) {
             throw new Asn1DecodingException(
                     String.format("INTEGER cannot be represented as long: %1$d (0x%1$x)", value),
@@ -529,7 +564,12 @@ public final class Asn1BerParser {
         Field[] declaredFields = containerClass.getDeclaredFields();
         List<AnnotatedField> result = new ArrayList<>(declaredFields.length);
         for (Field field : declaredFields) {
-            Asn1Field annotation = field.getDeclaredAnnotation(Asn1Field.class);
+            Asn1Field annotation;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                annotation = field.getDeclaredAnnotation(Asn1Field.class);
+            } else {
+                annotation = field.getAnnotation(Asn1Field.class);
+            }
             if (annotation == null) {
                 continue;
             }
@@ -574,7 +614,15 @@ public final class Asn1BerParser {
                         field.set(obj, convert(type, dataValue, field.getType()));
                         break;
                 }
-            } catch (ReflectiveOperationException e) {
+            } catch (Exception e) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    if (e instanceof ReflectiveOperationException) {
+                        throw new Asn1DecodingException(
+                                "Failed to set value of " + obj.getClass().getName()
+                                        + "." + field.getName(),
+                                e);
+                    }
+                }
                 throw new Asn1DecodingException(
                         "Failed to set value of " + obj.getClass().getName()
                                 + "." + field.getName(),
@@ -643,8 +691,12 @@ public final class Asn1BerParser {
                     }
                     break;
                 case SEQUENCE: {
-                    Asn1Class containerAnnotation =
-                            targetType.getDeclaredAnnotation(Asn1Class.class);
+                    Asn1Class containerAnnotation;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        containerAnnotation = targetType.getDeclaredAnnotation(Asn1Class.class);
+                    } else {
+                        containerAnnotation = targetType.getAnnotation(Asn1Class.class);
+                    }
                     if ((containerAnnotation != null)
                             && (containerAnnotation.type() == Asn1Type.SEQUENCE)) {
                         return parseSequence(dataValue, targetType);
@@ -652,8 +704,12 @@ public final class Asn1BerParser {
                     break;
                 }
                 case CHOICE: {
-                    Asn1Class containerAnnotation =
-                            targetType.getDeclaredAnnotation(Asn1Class.class);
+                    Asn1Class containerAnnotation;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        containerAnnotation = targetType.getDeclaredAnnotation(Asn1Class.class);
+                    } else {
+                        containerAnnotation = targetType.getAnnotation(Asn1Class.class);
+                    }
                     if ((containerAnnotation != null)
                             && (containerAnnotation.type() == Asn1Type.CHOICE)) {
                         return parseChoice(dataValue, targetType);

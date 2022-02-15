@@ -16,6 +16,8 @@
 
 package com.android.apksig.internal.util;
 
+import android.os.Build;
+
 import com.android.apksig.util.DataSink;
 import com.android.apksig.util.DataSource;
 
@@ -34,7 +36,17 @@ public class ChainedDataSource implements DataSource {
 
     public ChainedDataSource(DataSource... sources) {
         mSources = sources;
-        mTotalSize = Arrays.stream(sources).mapToLong(src -> src.size()).sum();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            mTotalSize = Arrays.stream(sources).mapToLong(DataSource::size).sum();
+        } else {
+            long size = 0;
+            if (sources != null && sources.length > 0) {
+                for (DataSource src : sources) {
+                    size = size + src.size();
+                }
+            }
+            mTotalSize = size;
+        }
     }
 
     @Override
@@ -122,9 +134,7 @@ public class ChainedDataSource implements DataSource {
         int endIndex = lastSource.getFirst();
         long endLocalOffset = lastSource.getSecond();
 
-        for (int i = beginIndex + 1; i < endIndex; i++) {
-            sources.add(mSources[i]);
-        }
+        sources.addAll(Arrays.asList(mSources).subList(beginIndex + 1, endIndex));
 
         sources.add(mSources[endIndex].slice(0, endLocalOffset + 1));
         return new ChainedDataSource(sources.toArray(new DataSource[0]));

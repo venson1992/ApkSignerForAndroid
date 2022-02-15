@@ -4,6 +4,13 @@ plugins {
 }
 
 android {
+    //加载资源
+    Properties properties = new Properties()
+    InputStream inputStream = project.rootProject.file('local.properties').newDataInputStream()
+    properties.load(inputStream)
+    //读取字段
+    def keyAlias = properties.getProperty('keyAlias')
+    def keyPassword = properties.getProperty('keyPassword')
     compileSdkVersion COMPILE_SDK_VERSION as int
     buildToolsVersion BUILD_TOOLS_VERSION
     defaultConfig {
@@ -14,6 +21,8 @@ android {
         versionName BUILD_VERSION
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
+        buildConfigField("String", "ks_alias", '"' + keyAlias + '"')
+        buildConfigField("String", "ks_password", '"' + keyPassword + '"')
     }
     buildTypes {
         release {
