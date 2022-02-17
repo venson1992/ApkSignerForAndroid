@@ -16,8 +16,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import com.android.apksigner.*
 import com.blankj.utilcode.util.UriUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 
@@ -26,8 +30,7 @@ class SignActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "Signer"
         private const val REQUEST_PERMISSION_CODE: Int = 0x0012
-        private const val REQUEST_DOCUMENT_SIGN: Int = 0x0020
-        private const val REQUEST_DOCUMENT_VERIFY: Int = 0x0021
+        private const val REQUEST_DOCUMENT_CODE: Int = 0x0020
     }
 
     init {
@@ -38,6 +41,7 @@ class SignActivity : AppCompatActivity() {
 
     private lateinit var mPasswordEditView: EditText
     private lateinit var mAliasEditView: EditText
+    private lateinit var mPickButton: View
     private lateinit var mSignButton: View
     private lateinit var mVerifyButton: View
     private lateinit var mScrollView: View
@@ -48,6 +52,7 @@ class SignActivity : AppCompatActivity() {
         setContentView(R.layout.activity_sign)
         mPasswordEditView = findViewById(R.id.passwordEditView)
         mAliasEditView = findViewById(R.id.aliasEditView)
+        mPickButton = findViewById(R.id.pickButton)
         mSignButton = findViewById(R.id.signButton)
         mVerifyButton = findViewById(R.id.verifyButton)
         mScrollView = findViewById(R.id.scrollView)
@@ -66,17 +71,20 @@ class SignActivity : AppCompatActivity() {
         }
         mPasswordEditView.setText(BuildConfig.ks_password)
         mAliasEditView.setText(BuildConfig.ks_alias)
+        mPickButton.setOnClickListener {
+            mLogView.text = ""
+            mSrcApkFile = null
+            openDocument()
+        }
         mSignButton.setOnClickListener {
             clickAction()
-            mSrcApkFile = null
         }
         mVerifyButton.setOnClickListener {
             val srcApkFile = mSrcApkFile
             if (srcApkFile?.exists() != true) {
-                openDocument(REQUEST_DOCUMENT_VERIFY)
+                printLog("请先选择需要签名的文件")
                 return@setOnClickListener
             }
-            printLog("srcApkFile=$srcApkFile")
             var logBuilder = StringBuilder()
             verify(srcApkFile, logBuilder)
             printLog(logBuilder.toString())
@@ -114,10 +122,9 @@ class SignActivity : AppCompatActivity() {
     }
 
     private fun clickAction() {
-        mLogView.text = ""
         val srcApkFile = mSrcApkFile
         if (srcApkFile?.exists() != true) {
-            openDocument(REQUEST_DOCUMENT_SIGN)
+            printLog("请先选择需要签名的文件")
             return
         }
         val signPath = "$filesDir/Android.keystore"
@@ -149,7 +156,7 @@ class SignActivity : AppCompatActivity() {
         }
     }
 
-    private fun openDocument(requestCode: Int) {
+    private fun openDocument() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
             printLog("未提供安装包", true)
             return
@@ -171,7 +178,7 @@ class SignActivity : AppCompatActivity() {
                 Intent.EXTRA_MIME_TYPES,
                 arrayOf("application/vnd.android.package-archive")
             )
-            startActivityForResult(intent, requestCode)
+            startActivityForResult(intent, REQUEST_DOCUMENT_CODE)
         } catch (e: ActivityNotFoundException) {
             printLog(e)
         }
@@ -180,7 +187,7 @@ class SignActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
-            REQUEST_DOCUMENT_SIGN, REQUEST_DOCUMENT_VERIFY -> {
+            REQUEST_DOCUMENT_CODE -> {
                 if (resultCode != RESULT_OK) {
                     return
                 }
@@ -190,11 +197,17 @@ class SignActivity : AppCompatActivity() {
                         printLog("文件载入失败", true)
                         return
                     }
+                    if (file.nameWithoutExtension.endsWith("_signed")) {
+                        printLog("该文件已经在工具签过名了")
+                        return
+                    }
                     mSrcApkFile = file
-                    if (requestCode == REQUEST_DOCUMENT_SIGN) {
-                        clickAction()
-                    } else {
-                        mVerifyButton.performClick()
+                    printLog("srcApkFile=${file.absolutePath}")
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val appInfo = getAppInfo(this@SignActivity, file)
+                        withContext(Dispatchers.Main) {
+                            printLog(appInfo.toString())
+                        }
                     }
                 } ?: printLog("文件读取失败", true)
             }
