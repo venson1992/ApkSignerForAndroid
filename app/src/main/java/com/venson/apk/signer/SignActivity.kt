@@ -1,6 +1,8 @@
 package com.venson.apk.signer
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -15,18 +17,24 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.android.apksigner.*
+import com.blankj.utilcode.util.UriUtils
 import java.io.File
+
 
 class SignActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Signer"
         private const val REQUEST_PERMISSION_CODE: Int = 0x0012
+        private const val REQUEST_DOCUMENT_SIGN: Int = 0x0020
+        private const val REQUEST_DOCUMENT_VERIFY: Int = 0x0021
     }
 
     init {
         addProviders()
     }
+
+    private var mSrcApkFile: File? = null
 
     private lateinit var mPasswordEditView: EditText
     private lateinit var mAliasEditView: EditText
@@ -60,25 +68,25 @@ class SignActivity : AppCompatActivity() {
         mAliasEditView.setText(BuildConfig.ks_alias)
         mSignButton.setOnClickListener {
             clickAction()
+            mSrcApkFile = null
         }
         mVerifyButton.setOnClickListener {
-            val srcApkFile = getTestApk()
-            verify(srcApkFile)
+            val srcApkFile = mSrcApkFile
+            if (srcApkFile?.exists() != true) {
+                openDocument(REQUEST_DOCUMENT_VERIFY)
+                return@setOnClickListener
+            }
+            printLog("srcApkFile=$srcApkFile")
+            var logBuilder = StringBuilder()
+            verify(srcApkFile, logBuilder)
+            printLog(logBuilder.toString())
             getSignedFile(srcApkFile)?.let {
-                verify(it)
-            } ?: printLog("签名后文件丢失")
+                logBuilder = StringBuilder()
+                verify(it, logBuilder)
+                printLog(logBuilder.toString())
+            }
+            mSrcApkFile = null
         }
-    }
-
-    private fun getTestApk(): File {
-        val srcFilePath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            "/storage/emulated/0/25game/apps/-2005212810.apk"
-        } else {
-            "/storage/sdcard/25game/apps/-2005212810.apk"
-        }
-        val srcFile = File(srcFilePath)
-        printLog("srcFile=$srcFile")
-        return srcFile
     }
 
     private fun getSignedFile(srcApkFile: File): File? {
@@ -101,12 +109,17 @@ class SignActivity : AppCompatActivity() {
                 return null
             }
         }
+        printLog("signedApk=$signedApk")
         return signedApk
     }
 
     private fun clickAction() {
         mLogView.text = ""
-        val srcFile = getTestApk()
+        val srcApkFile = mSrcApkFile
+        if (srcApkFile?.exists() != true) {
+            openDocument(REQUEST_DOCUMENT_SIGN)
+            return
+        }
         val signPath = "$filesDir/Android.keystore"
         val inputStream = readKeyStoreFromAsset(this, "Android.keystore")
         val isCopySuccess: Boolean = copyKeyStoreToFile(inputStream, signPath)
@@ -124,15 +137,67 @@ class SignActivity : AppCompatActivity() {
         val signPassword = mPasswordEditView.text.toString()
         val signAlias = mAliasEditView.text.toString()
         try {
-            val signedApk = getSignedFile(srcFile)
+            val signedApk = getSignedFile(srcApkFile)
             if (signedApk == null || !signedApk.exists()) {
                 printLog("signedApk 不存在")
                 return
             }
-            sign(srcFile, signedApk, signFile, signPassword, signAlias)
+            sign(srcApkFile, signedApk, signFile, signPassword, signAlias)
             printLog("signed successful! ${signedApk.absolutePath}", true)
         } catch (e: Exception) {
             printLog(e, true)
+        }
+    }
+
+    private fun openDocument(requestCode: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
+            printLog("未提供安装包", true)
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            //文档需要是可以打开的
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            //是否支持多选，默认不支持
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            val uri = Uri.Builder()
+                .scheme(ContentResolver.SCHEME_CONTENT)
+                .authority("com.android.externalstorage.documents")
+                .appendPath("document")
+                .appendPath("primary")
+                .build()
+            intent.setDataAndType(uri, "*/*")
+            intent.putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/vnd.android.package-archive")
+            )
+            startActivityForResult(intent, requestCode)
+        } catch (e: ActivityNotFoundException) {
+            printLog(e)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            REQUEST_DOCUMENT_SIGN, REQUEST_DOCUMENT_VERIFY -> {
+                if (resultCode != RESULT_OK) {
+                    return
+                }
+                data?.data?.let { uri ->
+                    val file = UriUtils.uri2File(uri)
+                    if (file?.exists() != true) {
+                        printLog("文件载入失败", true)
+                        return
+                    }
+                    mSrcApkFile = file
+                    if (requestCode == REQUEST_DOCUMENT_SIGN) {
+                        clickAction()
+                    } else {
+                        mVerifyButton.performClick()
+                    }
+                } ?: printLog("文件读取失败", true)
+            }
         }
     }
 

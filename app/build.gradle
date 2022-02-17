@@ -55,4 +55,5 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
 
     implementation project(path: ":lib_apk_signer")
+    implementation 'com.blankj:utilcodex:1.31.0'
 }

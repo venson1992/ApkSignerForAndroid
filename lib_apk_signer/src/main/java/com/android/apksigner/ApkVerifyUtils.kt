@@ -1,5 +1,6 @@
 package com.android.apksigner
 
+import android.util.Log
 import com.android.apksig.ApkVerifier
 import com.android.apksig.ApkVerifier.IssueWithParams
 import com.android.apksig.ApkVerifier.Result.*
@@ -18,7 +19,7 @@ fun addProviders() {
     }
 }
 
-fun verify(inputApk: File) {
+fun verify(inputApk: File, logBuilder: StringBuilder? = null) {
     val printCerts = true
     val verbose = true
     val warningsTreatedAsErrors = false
@@ -46,14 +47,30 @@ fun verify(inputApk: File) {
     if (verified) {
         val signerCerts = result.signerCertificates
         if (verbose) {
-            println("Verifies")
-            println("Verified using v1 scheme (JAR signing): " + result.isVerifiedUsingV1Scheme)
-            println("Verified using v2 scheme (APK Signature Scheme v2): " + result.isVerifiedUsingV2Scheme)
-            println("Verified using v3 scheme (APK Signature Scheme v3): " + result.isVerifiedUsingV3Scheme)
-            println("Verified using v4 scheme (APK Signature Scheme v4): " + result.isVerifiedUsingV4Scheme)
-            println("Verified for SourceStamp: " + result.isSourceStampVerified)
+            printLog("Verifies", logBuilder)
+            printLog(
+                "Verified using v1 scheme (JAR signing): "
+                        + result.isVerifiedUsingV1Scheme,
+                logBuilder
+            )
+            printLog(
+                "Verified using v2 scheme (APK Signature Scheme v2): "
+                        + result.isVerifiedUsingV2Scheme,
+                logBuilder
+            )
+            printLog(
+                "Verified using v3 scheme (APK Signature Scheme v3): "
+                        + result.isVerifiedUsingV3Scheme,
+                logBuilder
+            )
+            printLog(
+                "Verified using v4 scheme (APK Signature Scheme v4): "
+                        + result.isVerifiedUsingV4Scheme,
+                logBuilder
+            )
+            printLog("Verified for SourceStamp: " + result.isSourceStampVerified, logBuilder)
             if (!verifySourceStamp) {
-                println("Number of signers: " + signerCerts.size)
+                printLog("Number of signers: " + signerCerts.size, logBuilder)
             }
         }
         if (printCerts) {
@@ -62,23 +79,29 @@ fun verify(inputApk: File) {
             while (var23.hasNext()) {
                 val signerCert = var23.next() as X509Certificate
                 ++signerNumber
-                ApkSignerTool.printCertificate(signerCert, "Signer #$signerNumber", verbose)
+                ApkSignerTool.printCertificate(
+                    signerCert,
+                    "Signer #$signerNumber",
+                    verbose,
+                    logBuilder
+                )
             }
             if (sourceStampInfo != null) {
                 ApkSignerTool.printCertificate(
                     sourceStampInfo.certificate,
                     "Source Stamp Signer",
-                    verbose
+                    verbose,
+                    logBuilder
                 )
             }
         }
     } else {
-        System.err.println("DOES NOT VERIFY")
+        printLog("DOES NOT VERIFY", logBuilder)
     }
     val var29: Iterator<*> = result.errors.iterator()
     while (var29.hasNext()) {
         val error = var29.next() as IssueWithParams
-        System.err.println("ERROR: $error")
+        printLog("ERROR: $error", logBuilder)
     }
     val warningsOut = if (warningsTreatedAsErrors) System.err else System.out
     var var32: Iterator<*> = result.warnings.iterator()
@@ -97,7 +120,7 @@ fun verify(inputApk: File) {
         var25 = signer.errors.iterator()
         while (var25.hasNext()) {
             warning = var25.next() as IssueWithParams
-            System.err.println("ERROR: JAR signer $signerName: $warning")
+            printLog("ERROR: JAR signer $signerName: $warning", logBuilder)
         }
         var25 = signer.warnings.iterator()
         while (var25.hasNext()) {
@@ -113,7 +136,7 @@ fun verify(inputApk: File) {
         var25 = signer.errors.iterator()
         while (var25.hasNext()) {
             warning = var25.next() as IssueWithParams
-            System.err.println("ERROR: APK Signature Scheme v2 $signerName: $warning")
+            printLog("ERROR: APK Signature Scheme v2 $signerName: $warning", logBuilder)
         }
         var25 = signer.warnings.iterator()
         while (var25.hasNext()) {
@@ -129,7 +152,7 @@ fun verify(inputApk: File) {
         var25 = signer.errors.iterator()
         while (var25.hasNext()) {
             warning = var25.next() as IssueWithParams
-            System.err.println("ERROR: APK Signature Scheme v3 $signerName: $warning")
+            printLog("ERROR: APK Signature Scheme v3 $signerName: $warning", logBuilder)
         }
         var25 = signer.warnings.iterator()
         while (var25.hasNext()) {
@@ -142,7 +165,7 @@ fun verify(inputApk: File) {
         var32 = sourceStampInfo.errors.iterator()
         while (var32.hasNext()) {
             warning = var32.next() as IssueWithParams
-            System.err.println("ERROR: SourceStamp: $warning")
+            printLog("ERROR: SourceStamp: $warning", logBuilder)
         }
         var32 = sourceStampInfo.warnings.iterator()
         while (var32.hasNext()) {
@@ -150,4 +173,15 @@ fun verify(inputApk: File) {
             warningsOut.println("WARNING: SourceStamp: $warning")
         }
     }
+}
+
+private fun printLog(msg: String, logBuilder: StringBuilder?) {
+    Log.d(VERIFY_TAG, msg)
+    if (logBuilder == null) {
+        return
+    }
+    if (logBuilder.isNotEmpty()) {
+        logBuilder.append("\n")
+    }
+    logBuilder.append(msg)
 }

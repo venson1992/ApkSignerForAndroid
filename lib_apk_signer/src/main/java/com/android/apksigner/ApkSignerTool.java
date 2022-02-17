@@ -622,7 +622,13 @@ public class ApkSignerTool {
         }
     }
 
-    public static void printCertificate(X509Certificate cert, String name, boolean verbose) throws NoSuchAlgorithmException, CertificateEncodingException {
+    public static void printCertificate(X509Certificate cert, String name, boolean verbose)
+            throws CertificateEncodingException, NoSuchAlgorithmException {
+        printCertificate(cert, name, verbose, null);
+    }
+
+    public static void printCertificate(X509Certificate cert, String name, boolean verbose, StringBuilder logBuilder)
+            throws NoSuchAlgorithmException, CertificateEncodingException {
         if (cert == null) {
             throw new NullPointerException("cert == null");
         } else {
