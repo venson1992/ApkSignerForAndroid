@@ -168,7 +168,13 @@ public class SignerParams {
             }
             Charset[] additionalPasswordEncodings = this.passwordCharset != null ? new Charset[]{this.passwordCharset} : new Charset[0];
             List<char[]> keystorePasswords = passwordRetriever.getPasswords(this.keyPasswordSpec, additionalPasswordEncodings);
-            loadKeyStoreFromFile(ks, "NONE".equals(this.keystoreFile) ? null : this.keystoreFile, keystorePasswords);
+            try {
+                loadKeyStoreFromFile(ks, "NONE".equals(this.keystoreFile) ? null : this.keystoreFile, keystorePasswords);
+            } catch (Exception e) {
+                ksType = "PKCS12";
+                ks = KeyStore.getInstance(ksType, "BC");
+                loadKeyStoreFromFile(ks, "NONE".equals(this.keystoreFile) ? null : this.keystoreFile, keystorePasswords);
+            }
             PrivateKey key = null;
             String keyAlias = this.keystoreKeyAlias;
             try {
